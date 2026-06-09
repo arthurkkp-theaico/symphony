@@ -46,9 +46,12 @@ defmodule SymphonyElixir.Config.Schema do
 
     embedded_schema do
       field(:kind, :string)
-      field(:endpoint, :string, default: "https://api.linear.app/graphql")
+      field(:endpoint, :string)
       field(:api_key, :string)
+      field(:email, :string)
       field(:project_slug, :string)
+      field(:project_key, :string)
+      field(:board_url, :string)
       field(:assignee, :string)
       field(:required_labels, {:array, :string}, default: [])
       field(:active_states, {:array, :string}, default: ["Todo", "In Progress"])
@@ -60,7 +63,19 @@ defmodule SymphonyElixir.Config.Schema do
       schema
       |> cast(
         attrs,
-        [:kind, :endpoint, :api_key, :project_slug, :assignee, :required_labels, :active_states, :terminal_states],
+        [
+          :kind,
+          :endpoint,
+          :api_key,
+          :email,
+          :project_slug,
+          :project_key,
+          :board_url,
+          :assignee,
+          :required_labels,
+          :active_states,
+          :terminal_states
+        ],
         empty_values: []
       )
       |> update_change(:required_labels, fn labels ->
@@ -97,12 +112,13 @@ defmodule SymphonyElixir.Config.Schema do
     @primary_key false
     embedded_schema do
       field(:root, :string, default: Path.join(System.tmp_dir!(), "symphony_workspaces"))
+      field(:github_repository, :string)
     end
 
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
     def changeset(schema, attrs) do
       schema
-      |> cast(attrs, [:root], empty_values: [])
+      |> cast(attrs, [:root, :github_repository], empty_values: [])
     end
   end
 
@@ -372,10 +388,18 @@ defmodule SymphonyElixir.Config.Schema do
   end
 
   defp finalize_settings(settings) do
+    api_key_fallback =
+      case settings.tracker.kind do
+        "jira" -> System.get_env("JIRA_API_TOKEN")
+        _ -> System.get_env("LINEAR_API_KEY")
+      end
+
     tracker = %{
       settings.tracker
-      | api_key: resolve_secret_setting(settings.tracker.api_key, System.get_env("LINEAR_API_KEY")),
-        assignee: resolve_secret_setting(settings.tracker.assignee, System.get_env("LINEAR_ASSIGNEE"))
+      | endpoint: tracker_endpoint(settings.tracker.kind, settings.tracker.endpoint),
+        api_key: resolve_secret_setting(settings.tracker.api_key, api_key_fallback),
+        email: resolve_secret_setting(settings.tracker.email, System.get_env("JIRA_EMAIL")),
+        assignee: resolve_secret_setting(settings.tracker.assignee, tracker_assignee_fallback(settings.tracker.kind))
     }
 
     workspace = %{
@@ -403,6 +427,13 @@ defmodule SymphonyElixir.Config.Schema do
 
   defp normalize_optional_map(nil), do: nil
   defp normalize_optional_map(value) when is_map(value), do: normalize_keys(value)
+
+  defp tracker_endpoint("jira", endpoint), do: endpoint
+  defp tracker_endpoint(_kind, nil), do: "https://api.linear.app/graphql"
+  defp tracker_endpoint(_kind, endpoint), do: endpoint
+
+  defp tracker_assignee_fallback("jira"), do: System.get_env("JIRA_ASSIGNEE_ACCOUNT_ID")
+  defp tracker_assignee_fallback(_kind), do: System.get_env("LINEAR_ASSIGNEE")
 
   defp normalize_key(value) when is_atom(value), do: Atom.to_string(value)
   defp normalize_key(value), do: to_string(value)

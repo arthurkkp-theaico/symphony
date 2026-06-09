@@ -20,6 +20,9 @@ defmodule SymphonyElixir.Codex.AppServer do
           auto_approve_requests: boolean(),
           thread_sandbox: String.t(),
           turn_sandbox_policy: map(),
+          tracker_kind: String.t(),
+          tracker_project_key: String.t() | nil,
+          tracker_terminal_states: [String.t()],
           thread_id: String.t(),
           workspace: Path.t(),
           worker_host: String.t() | nil
@@ -39,13 +42,15 @@ defmodule SymphonyElixir.Codex.AppServer do
   @spec start_session(Path.t(), keyword()) :: {:ok, session()} | {:error, term()}
   def start_session(workspace, opts \\ []) do
     worker_host = Keyword.get(opts, :worker_host)
+    tracker = Config.settings!().tracker
+    tracker_kind = tracker.kind
 
     with {:ok, expanded_workspace} <- validate_workspace_cwd(workspace, worker_host),
          {:ok, port} <- start_port(expanded_workspace, worker_host) do
       metadata = port_metadata(port, worker_host)
 
       with {:ok, session_policies} <- session_policies(expanded_workspace, worker_host),
-           {:ok, thread_id} <- do_start_session(port, expanded_workspace, session_policies) do
+           {:ok, thread_id} <- do_start_session(port, expanded_workspace, session_policies, tracker_kind) do
         {:ok,
          %{
            port: port,
@@ -54,6 +59,9 @@ defmodule SymphonyElixir.Codex.AppServer do
            auto_approve_requests: session_policies.approval_policy == "never",
            thread_sandbox: session_policies.thread_sandbox,
            turn_sandbox_policy: session_policies.turn_sandbox_policy,
+           tracker_kind: tracker_kind,
+           tracker_project_key: tracker.project_key,
+           tracker_terminal_states: tracker.terminal_states,
            thread_id: thread_id,
            workspace: expanded_workspace,
            worker_host: worker_host
@@ -74,6 +82,9 @@ defmodule SymphonyElixir.Codex.AppServer do
           approval_policy: approval_policy,
           auto_approve_requests: auto_approve_requests,
           turn_sandbox_policy: turn_sandbox_policy,
+          tracker_kind: tracker_kind,
+          tracker_project_key: tracker_project_key,
+          tracker_terminal_states: tracker_terminal_states,
           thread_id: thread_id,
           workspace: workspace
         },
@@ -85,7 +96,14 @@ defmodule SymphonyElixir.Codex.AppServer do
 
     tool_executor =
       Keyword.get(opts, :tool_executor, fn tool, arguments ->
-        DynamicTool.execute(tool, arguments)
+        DynamicTool.execute(tool, arguments,
+          workspace: workspace,
+          github_repository: Config.settings!().workspace.github_repository,
+          issue_identifier: issue.identifier,
+          project_key: tracker_project_key,
+          terminal_states: tracker_terminal_states,
+          tracker_kind: tracker_kind
+        )
       end)
 
     case start_turn(port, thread_id, prompt, issue, workspace, approval_policy, turn_sandbox_policy) do
@@ -270,14 +288,19 @@ defmodule SymphonyElixir.Codex.AppServer do
     Config.codex_runtime_settings(workspace, remote: true)
   end
 
-  defp do_start_session(port, workspace, session_policies) do
+  defp do_start_session(port, workspace, session_policies, tracker_kind) do
     case send_initialize(port) do
-      :ok -> start_thread(port, workspace, session_policies)
+      :ok -> start_thread(port, workspace, session_policies, tracker_kind)
       {:error, reason} -> {:error, reason}
     end
   end
 
-  defp start_thread(port, workspace, %{approval_policy: approval_policy, thread_sandbox: thread_sandbox}) do
+  defp start_thread(
+         port,
+         workspace,
+         %{approval_policy: approval_policy, thread_sandbox: thread_sandbox},
+         tracker_kind
+       ) do
     send_message(port, %{
       "method" => "thread/start",
       "id" => @thread_start_id,
@@ -285,7 +308,7 @@ defmodule SymphonyElixir.Codex.AppServer do
         "approvalPolicy" => approval_policy,
         "sandbox" => thread_sandbox,
         "cwd" => workspace,
-        "dynamicTools" => DynamicTool.tool_specs()
+        "dynamicTools" => DynamicTool.tool_specs(tracker_kind)
       }
     })
 

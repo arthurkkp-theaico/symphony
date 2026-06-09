@@ -383,6 +383,64 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     refute issue.assigned_to_worker
   end
 
+  test "jira client normalizes issue fields from REST search results" do
+    write_workflow_file!(
+      Workflow.workflow_file_path(),
+      tracker_kind: "jira",
+      tracker_endpoint: "https://example.atlassian.net",
+      tracker_email: "agent@example.com",
+      tracker_project_key: "SD",
+      tracker_project_slug: nil
+    )
+
+    raw_issue = %{
+      "id" => "10001",
+      "key" => "SD-1",
+      "fields" => %{
+        "summary" => "Broken support flow",
+        "description" => %{
+          "type" => "doc",
+          "version" => 1,
+          "content" => [
+            %{
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "text" => "Please fix the queue."}]
+            }
+          ]
+        },
+        "status" => %{"name" => "Todo"},
+        "priority" => %{"id" => "2"},
+        "assignee" => %{"accountId" => "user-1"},
+        "labels" => ["Support"],
+        "issuelinks" => [
+          %{
+            "type" => %{"inward" => "is blocked by"},
+            "inwardIssue" => %{
+              "id" => "10002",
+              "key" => "SD-2",
+              "fields" => %{"status" => %{"name" => "In Progress"}}
+            }
+          }
+        ],
+        "created" => "2026-01-01T00:00:00.000+0000",
+        "updated" => "2026-01-02T00:00:00.000+0000"
+      }
+    }
+
+    issue = SymphonyElixir.Jira.Client.normalize_issue_for_test(raw_issue)
+
+    assert issue.id == "10001"
+    assert issue.identifier == "SD-1"
+    assert issue.title == "Broken support flow"
+    assert issue.description == "Please fix the queue."
+    assert issue.priority == 2
+    assert issue.state == "Todo"
+    assert issue.url == "https://example.atlassian.net/browse/SD-1"
+    assert issue.assignee_id == "user-1"
+    assert issue.labels == ["support"]
+    assert issue.blocked_by == [%{id: "10002", identifier: "SD-2", state: "In Progress"}]
+  end
+
   test "linear client pagination merge helper preserves issue ordering" do
     issue_page_1 = [
       %Issue{id: "issue-1", identifier: "MT-1"},
@@ -950,6 +1008,46 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     write_workflow_file!(Workflow.workflow_file_path(), codex_command: "codex app-server")
     assert Config.settings!().codex.command == "codex app-server"
+  end
+
+  test "jira requires an explicit HTTPS endpoint while linear keeps its default" do
+    assert {:ok, linear_settings} = Schema.parse(%{tracker: %{kind: "linear"}})
+    assert linear_settings.tracker.endpoint == "https://api.linear.app/graphql"
+
+    assert {:ok, jira_settings} = Schema.parse(%{tracker: %{kind: "jira"}})
+    assert jira_settings.tracker.endpoint == nil
+
+    jira_config = [
+      tracker_kind: "jira",
+      tracker_api_token: "jira-token",
+      tracker_email: "agent@example.com",
+      tracker_project_key: "SD",
+      tracker_project_slug: nil
+    ]
+
+    write_workflow_file!(
+      Workflow.workflow_file_path(),
+      Keyword.put(jira_config, :tracker_endpoint, nil)
+    )
+
+    assert Config.settings!().tracker.endpoint == nil
+    assert {:error, :missing_jira_endpoint} = Config.validate!()
+
+    for invalid_endpoint <- ["", "http://example.atlassian.net", "https:///missing-host"] do
+      write_workflow_file!(
+        Workflow.workflow_file_path(),
+        Keyword.put(jira_config, :tracker_endpoint, invalid_endpoint)
+      )
+
+      assert {:error, :invalid_jira_endpoint} = Config.validate!()
+    end
+
+    write_workflow_file!(
+      Workflow.workflow_file_path(),
+      Keyword.put(jira_config, :tracker_endpoint, "https://example.atlassian.net")
+    )
+
+    assert :ok = Config.validate!()
   end
 
   test "config resolves $VAR references for env-backed secret and path values" do

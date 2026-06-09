@@ -98,19 +98,37 @@ defmodule SymphonyElixir.CoreTest do
 
     tracker = Map.get(config, "tracker", %{})
     assert is_map(tracker)
-    assert Map.get(tracker, "kind") == "linear"
-    assert is_binary(Map.get(tracker, "project_slug"))
+    assert Map.get(tracker, "kind") == "jira"
+    assert Map.get(tracker, "endpoint") == "https://theaicompany-team-a0c6o5ij.atlassian.net"
+    assert Map.get(tracker, "board_url") == "https://theaicompany-team-a0c6o5ij.atlassian.net/jira/servicedesk/projects/SD/boards/1"
+    assert Map.get(tracker, "project_key") == "SD"
     assert is_list(Map.get(tracker, "active_states"))
+    assert "Triaged" in Map.get(tracker, "active_states")
     assert is_list(Map.get(tracker, "terminal_states"))
+
+    assert get_in(config, ["workspace", "root"]) ==
+             "~/code/doordash-data-platform-strawman-workspaces"
+
+    assert get_in(config, ["workspace", "github_repository"]) ==
+             "arthurkkp-theaico/doordash-data-platform-strawman"
 
     hooks = Map.get(config, "hooks", %{})
     assert is_map(hooks)
-    assert Map.get(hooks, "after_create") =~ "git clone --depth 1 https://github.com/openai/symphony ."
-    assert Map.get(hooks, "after_create") =~ "cd elixir && mise trust"
-    assert Map.get(hooks, "after_create") =~ "mise exec -- mix deps.get"
-    assert Map.get(hooks, "before_remove") =~ "cd elixir && mise exec -- mix workspace.before_remove"
+    assert Map.get(hooks, "after_create") =~ "SYMPHONY_REPO_PROVIDER"
+
+    assert Map.get(hooks, "after_create") =~
+             "https://github.com/arthurkkp-theaico/doordash-data-platform-strawman.git"
+
+    assert Map.get(hooks, "after_create") =~ "file://${HOME}/code/gitlab-dummy/symphony-dummy.git"
+    assert Map.get(hooks, "after_create") =~ ~s(git clone --depth 1 "$repo_url" .)
+    assert Map.get(hooks, "after_create") =~ "uv sync --all-groups"
+    assert Map.get(hooks, "before_remove") =~ "SYMPHONY_ELIXIR_DIR"
+    assert Map.get(hooks, "before_remove") =~ ~s(cd "$symphony_elixir_dir")
+    assert Map.get(hooks, "before_remove") =~ "mix workspace.before_remove"
+    assert Map.get(hooks, "before_remove") =~ "--branch"
 
     assert String.trim(prompt) != ""
+    assert prompt =~ "`Triaged` -> implementation actively underway"
     assert is_binary(Config.workflow_prompt())
     assert Config.workflow_prompt() == prompt
   end
@@ -1007,7 +1025,7 @@ defmodule SymphonyElixir.CoreTest do
 
     prompt = PromptBuilder.build_prompt(issue)
 
-    assert prompt =~ "You are working on a Linear issue."
+    assert prompt =~ "You are working on a tracker issue."
     assert prompt =~ "Identifier: MT-777"
     assert prompt =~ "Title: Make fallback prompt useful"
     assert prompt =~ "Body:"
@@ -1083,7 +1101,7 @@ defmodule SymphonyElixir.CoreTest do
 
     prompt = PromptBuilder.build_prompt(issue, attempt: 2)
 
-    assert prompt =~ "You are working on a Linear ticket `MT-616`"
+    assert prompt =~ "You are working on a Jira ticket `MT-616`"
     assert prompt =~ "Issue context:"
     assert prompt =~ "Identifier: MT-616"
     assert prompt =~ "Title: Use rich templates for WORKFLOW.md"
@@ -1092,8 +1110,8 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "This is an unattended orchestration session."
     assert prompt =~ "Only stop early for a true blocker"
     assert prompt =~ "Do not include \"next steps for user\""
-    assert prompt =~ "open and follow `.codex/skills/land/SKILL.md`"
-    assert prompt =~ "Do not call `gh pr merge` directly"
+    assert prompt =~ "Run `make test` as the default local validation gate"
+    assert prompt =~ "`gh pr merge --squash --delete-branch`"
     assert prompt =~ "Continuation context:"
     assert prompt =~ "retry attempt #2"
   end

@@ -1,0 +1,809 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Symphony Orchestration Flow</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #121316;
+        --panel: #191b20;
+        --panel-2: #20232a;
+        --text: #f4f1ea;
+        --muted: #b8b0a1;
+        --line: #5b6472;
+        --tracker: #62d5c8;
+        --daemon: #f0b35a;
+        --workspace: #9dd66d;
+        --codex: #d282d9;
+        --agent: #f58ab6;
+        --dashboard: #7da8ff;
+        --danger: #ff7d7d;
+        --shadow: 0 22px 70px rgba(0, 0, 0, 0.34);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at 18% 8%, rgba(98, 213, 200, 0.13), transparent 30%),
+          radial-gradient(circle at 88% 78%, rgba(210, 130, 217, 0.11), transparent 32%),
+          var(--bg);
+        color: var(--text);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+      }
+
+      main {
+        width: min(1320px, calc(100vw - 36px));
+        margin: 0 auto;
+        padding: 28px 0;
+      }
+
+      header {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 24px;
+        margin-bottom: 18px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(28px, 4vw, 54px);
+        line-height: 1.02;
+        letter-spacing: 0;
+      }
+
+      .subtitle {
+        margin: 10px 0 0;
+        max-width: 660px;
+        color: var(--muted);
+        font-size: 16px;
+        line-height: 1.5;
+      }
+
+      .shell {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 330px;
+        gap: 18px;
+        align-items: stretch;
+      }
+
+      .stage {
+        position: relative;
+        min-height: 760px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        background:
+          linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+          rgba(16, 18, 22, 0.82);
+        background-size: 36px 36px;
+        box-shadow: var(--shadow);
+      }
+
+      .map {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 2;
+        pointer-events: none;
+      }
+
+      .zone {
+        position: absolute;
+        z-index: 1;
+        border: 1.5px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.025);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.025);
+        transition:
+          border-color 180ms ease,
+          background 180ms ease,
+          box-shadow 180ms ease;
+      }
+
+      .zone::before {
+        content: attr(data-label);
+        position: absolute;
+        top: 12px;
+        left: 14px;
+        padding: 4px 8px;
+        border-radius: 6px;
+        background: rgba(18, 19, 22, 0.86);
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .zone.active {
+        border-color: color-mix(in srgb, var(--zone-color), transparent 28%);
+        background: color-mix(in srgb, var(--zone-color), transparent 94%);
+        box-shadow:
+          inset 0 0 0 1px color-mix(in srgb, var(--zone-color), transparent 82%),
+          0 0 36px color-mix(in srgb, var(--zone-color), transparent 88%);
+      }
+
+      .zone-tracker {
+        left: 3.5%;
+        top: 28%;
+        width: 25.5%;
+        height: 48%;
+        --zone-color: var(--tracker);
+      }
+
+      .zone-daemon {
+        left: 31%;
+        top: 12%;
+        width: 31.5%;
+        height: 72%;
+        --zone-color: var(--daemon);
+      }
+
+      .zone-worker {
+        right: 3.5%;
+        top: 7%;
+        width: 31.5%;
+        height: 86%;
+        --zone-color: var(--codex);
+      }
+
+      .flow-line {
+        fill: none;
+        stroke: var(--line);
+        stroke-width: 3;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        opacity: 0.24;
+        transition:
+          stroke 220ms ease,
+          opacity 220ms ease,
+          stroke-width 220ms ease;
+      }
+
+      .flow-line.active {
+        stroke: var(--active-color, var(--daemon));
+        stroke-width: 3;
+        opacity: 0.95;
+        filter: drop-shadow(0 0 12px color-mix(in srgb, var(--active-color), transparent 45%));
+      }
+
+      .packet {
+        opacity: 0;
+        filter: drop-shadow(0 0 14px currentColor);
+      }
+
+      .packet.visible {
+        opacity: 1;
+      }
+
+      .node {
+        position: absolute;
+        z-index: 3;
+        width: 25%;
+        height: 22%;
+        padding: 18px;
+        border: 1.5px solid color-mix(in srgb, var(--accent), rgba(255, 255, 255, 0.12) 38%);
+        border-radius: 8px;
+        background:
+          linear-gradient(180deg, color-mix(in srgb, var(--accent), transparent 94%), transparent),
+          rgba(28, 31, 38, 0.96);
+        box-shadow:
+          0 16px 44px rgba(0, 0, 0, 0.28),
+          inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+        transition:
+          border-color 180ms ease,
+          transform 180ms ease,
+          box-shadow 180ms ease;
+      }
+
+      .node.active {
+        transform: translateY(-4px);
+        border-color: var(--accent);
+        box-shadow:
+          0 18px 58px rgba(0, 0, 0, 0.35),
+          0 0 0 3px color-mix(in srgb, var(--accent), transparent 82%);
+      }
+
+      .node .kicker {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .dot {
+        width: 10px;
+        height: 10px;
+        flex: 0 0 auto;
+        border-radius: 999px;
+        background: var(--accent);
+        box-shadow: 0 0 18px var(--accent);
+      }
+
+      .node h2 {
+        margin: 12px 0 8px;
+        font-size: 21px;
+        line-height: 1.1;
+        letter-spacing: 0;
+      }
+
+      .node p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13.5px;
+        line-height: 1.35;
+      }
+
+      .tracker {
+        left: 5%;
+        top: 37%;
+        --accent: var(--tracker);
+      }
+
+      .daemon {
+        left: 35.5%;
+        top: 24%;
+        --accent: var(--daemon);
+      }
+
+      .workspace {
+        right: 5%;
+        top: 13%;
+        --accent: var(--workspace);
+      }
+
+      .appserver {
+        right: 5%;
+        top: 39.5%;
+        --accent: var(--codex);
+      }
+
+      .agent {
+        right: 5%;
+        top: 65%;
+        --accent: var(--agent);
+      }
+
+      .dashboard {
+        left: 35.5%;
+        top: 57.5%;
+        --accent: var(--dashboard);
+      }
+
+      aside {
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        background: rgba(25, 27, 32, 0.92);
+        box-shadow: var(--shadow);
+        padding: 16px;
+      }
+
+      .controls {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+
+      button {
+        min-height: 40px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 8px;
+        background: var(--panel-2);
+        color: var(--text);
+        font: inherit;
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+        transition:
+          background 160ms ease,
+          border-color 160ms ease,
+          transform 160ms ease;
+      }
+
+      button:hover {
+        background: #2a2e37;
+        border-color: rgba(255, 255, 255, 0.24);
+      }
+
+      button:active {
+        transform: translateY(1px);
+      }
+
+      .primary {
+        background: #f0b35a;
+        color: #21170a;
+      }
+
+      .primary:hover {
+        background: #ffc36d;
+      }
+
+      .status {
+        min-height: 106px;
+        padding: 14px;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.055);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        margin-bottom: 14px;
+      }
+
+      .status strong {
+        display: block;
+        margin-bottom: 6px;
+        color: var(--text);
+        font-size: 15px;
+      }
+
+      .status p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.45;
+      }
+
+      .steps {
+        display: grid;
+        gap: 8px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .steps li {
+        display: grid;
+        grid-template-columns: 28px 1fr;
+        gap: 10px;
+        align-items: start;
+        min-height: 48px;
+        padding: 10px;
+        border-radius: 8px;
+        color: var(--muted);
+        background: rgba(255, 255, 255, 0.035);
+        border: 1px solid transparent;
+        cursor: pointer;
+      }
+
+      .steps li.active {
+        color: var(--text);
+        border-color: color-mix(in srgb, var(--step-color), transparent 48%);
+        background: color-mix(in srgb, var(--step-color), transparent 88%);
+      }
+
+      .step-number {
+        display: grid;
+        place-items: center;
+        width: 28px;
+        height: 28px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .steps li.active .step-number {
+        background: var(--step-color);
+        color: #121316;
+      }
+
+      .step-title {
+        display: block;
+        margin-bottom: 2px;
+        font-size: 14px;
+        font-weight: 800;
+      }
+
+      .step-copy {
+        display: block;
+        font-size: 12px;
+        line-height: 1.35;
+      }
+
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 14px;
+        margin-top: 14px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      @media (max-width: 980px) {
+        .shell {
+          grid-template-columns: 1fr;
+        }
+
+        .stage {
+          min-height: 700px;
+        }
+
+        aside {
+          order: -1;
+        }
+      }
+
+      @media (max-width: 720px) {
+        main {
+          width: min(100vw - 24px, 1220px);
+          padding-top: 18px;
+        }
+
+        header {
+          display: block;
+        }
+
+        .stage {
+          min-height: 940px;
+        }
+
+        .zone {
+          display: none;
+        }
+
+        .node {
+          left: 50% !important;
+          right: auto !important;
+          width: min(270px, calc(100% - 36px)) !important;
+          min-height: 104px;
+          transform: translateX(-50%);
+        }
+
+        .node.active {
+          transform: translateX(-50%) translateY(-3px);
+        }
+
+        .tracker {
+          top: 3%;
+        }
+
+        .daemon {
+          top: 18%;
+        }
+
+        .dashboard {
+          top: 33%;
+        }
+
+        .workspace {
+          top: 48%;
+        }
+
+        .appserver {
+          top: 63%;
+        }
+
+        .agent {
+          top: 78%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>Symphony Orchestration Flow</h1>
+          <p class="subtitle">
+            A screen-share friendly animation of how a ticket moves from the tracker into a
+            Codex-backed worker, then reports status back through Symphony.
+          </p>
+        </div>
+      </header>
+
+      <section class="shell" aria-label="Animated Symphony orchestration map">
+        <div class="stage">
+          <div class="zone zone-tracker" data-node="tracker" data-label="External control plane"></div>
+          <div class="zone zone-daemon" data-node="daemon dashboard" data-label="Symphony process"></div>
+          <div class="zone zone-worker" data-node="workspace appserver agent" data-label="Worker environment"></div>
+
+          <svg class="map" viewBox="0 0 1000 760" preserveAspectRatio="none" role="img" aria-label="Symphony orchestration flow map">
+            <defs>
+              <marker
+                id="arrow"
+                markerWidth="14"
+                markerHeight="14"
+                refX="12"
+                refY="7"
+                orient="auto"
+                markerUnits="userSpaceOnUse"
+              >
+                <path d="M1,1 L1,13 L13,7 z" fill="context-stroke"></path>
+              </marker>
+            </defs>
+
+            <path id="ticketToDaemon" class="flow-line" d="M300 365 L330 365 L330 260 L355 260" marker-end="url(#arrow)"></path>
+            <path id="daemonToWorkspace" class="flow-line" d="M605 238 L655 238 L655 185 L700 185" marker-end="url(#arrow)"></path>
+            <path id="daemonToAppserver" class="flow-line" d="M605 308 L650 308 L650 382 L700 382" marker-end="url(#arrow)"></path>
+            <path id="workspaceToAppserver" class="flow-line" d="M825 266 L825 300" marker-end="url(#arrow)"></path>
+            <path id="appserverToAgent" class="flow-line" d="M825 467 L825 494" marker-end="url(#arrow)"></path>
+            <path id="agentToWorkspace" class="flow-line" d="M950 560 L975 560 L975 185 L950 185" marker-end="url(#arrow)"></path>
+            <path id="agentToTracker" class="flow-line" d="M700 625 L650 625 L650 730 L180 730 L180 449" marker-end="url(#arrow)"></path>
+            <path id="appserverToDaemon" class="flow-line" d="M700 407 L668 407 L668 335 L605 335" marker-end="url(#arrow)"></path>
+            <path id="daemonToDashboard" class="flow-line" d="M480 349 L480 437" marker-end="url(#arrow)"></path>
+            <path id="retryToAppserver" class="flow-line" d="M605 344 L640 344 L640 452 L700 452" marker-end="url(#arrow)"></path>
+
+            <circle id="packet" class="packet" r="9" fill="currentColor"></circle>
+          </svg>
+
+          <article class="node tracker" data-node="tracker">
+            <div class="kicker"><span class="dot"></span>Control plane</div>
+            <h2>Issue Tracker</h2>
+            <p>Jira or Linear holds the ticket, status, comments, and handoff state.</p>
+          </article>
+
+          <article class="node daemon" data-node="daemon">
+            <div class="kicker"><span class="dot"></span>Daemon container</div>
+            <h2>Symphony Daemon</h2>
+            <p>Polls, claims, dispatches, retries, blocks, and reports agent progress.</p>
+          </article>
+
+          <article class="node workspace" data-node="workspace">
+            <div class="kicker"><span class="dot"></span>Isolation</div>
+            <h2>Workspace</h2>
+            <p>Per-ticket repo copy where hooks prepare dependencies and local state.</p>
+          </article>
+
+          <article class="node appserver" data-node="appserver">
+            <div class="kicker"><span class="dot"></span>Codex process</div>
+            <h2>Codex app-server</h2>
+            <p>Stdio JSON-RPC process launched inside the ticket workspace.</p>
+          </article>
+
+          <article class="node agent" data-node="agent">
+            <div class="kicker"><span class="dot"></span>Agent turn runtime</div>
+            <h2>Codex agent</h2>
+            <p>Runs turns inside app-server: edits, tests, tools, and PR work.</p>
+          </article>
+
+          <article class="node dashboard" data-node="dashboard">
+            <div class="kicker"><span class="dot"></span>Visibility</div>
+            <h2>Dashboard / API</h2>
+            <p>Served by Symphony to show running, blocked, retry, and token state.</p>
+          </article>
+        </div>
+
+        <aside>
+          <div class="controls" aria-label="Animation controls">
+            <button id="prevBtn" type="button">Back</button>
+            <button id="playBtn" type="button" class="primary">Play</button>
+            <button id="nextBtn" type="button">Next</button>
+          </div>
+
+          <div class="status" aria-live="polite">
+            <strong id="statusTitle">Ready</strong>
+            <p id="statusCopy">Press Play to animate the flow, or click a step below.</p>
+          </div>
+
+          <ol id="steps" class="steps"></ol>
+
+          <div class="legend" aria-label="Legend">
+            <span><span class="dot" style="--accent: var(--tracker)"></span>Tracker</span>
+            <span><span class="dot" style="--accent: var(--daemon)"></span>Daemon</span>
+            <span><span class="dot" style="--accent: var(--workspace)"></span>Workspace</span>
+            <span><span class="dot" style="--accent: var(--codex)"></span>App-server</span>
+            <span><span class="dot" style="--accent: var(--agent)"></span>Agent turn</span>
+            <span><span class="dot" style="--accent: var(--dashboard)"></span>Dashboard</span>
+          </div>
+        </aside>
+      </section>
+    </main>
+
+    <script>
+      const steps = [
+        {
+          title: "Ticket appears",
+          copy: "The tracker exposes an active ticket that matches the workflow rules.",
+          path: "ticketToDaemon",
+          color: "#62d5c8",
+          nodes: ["tracker", "daemon"],
+        },
+        {
+          title: "Daemon creates workspace",
+          copy: "Symphony claims the ticket and prepares an isolated repo copy.",
+          path: "daemonToWorkspace",
+          color: "#9dd66d",
+          nodes: ["daemon", "workspace"],
+        },
+        {
+          title: "Daemon starts app-server",
+          copy: "The worker launches the codex app-server process with the configured policy.",
+          path: "daemonToAppserver",
+          color: "#f0b35a",
+          nodes: ["daemon", "appserver"],
+        },
+        {
+          title: "Workspace feeds context",
+          copy: "The app-server runs in the ticket workspace, seeing repo files and setup output.",
+          path: "workspaceToAppserver",
+          color: "#9dd66d",
+          nodes: ["workspace", "appserver"],
+        },
+        {
+          title: "Agent turn starts",
+          copy: "The app-server hosts the Codex agent turn runtime for the ticket.",
+          path: "appserverToAgent",
+          color: "#d282d9",
+          nodes: ["appserver", "agent"],
+        },
+        {
+          title: "Agent works the ticket",
+          copy: "The agent runtime edits, runs commands, validates behavior, and prepares PR work.",
+          path: "agentToWorkspace",
+          color: "#f58ab6",
+          nodes: ["agent", "workspace"],
+        },
+        {
+          title: "Codex updates tracker",
+          copy: "Agent tool requests flow back through Symphony to write tracker comments and state.",
+          path: "agentToTracker",
+          color: "#62d5c8",
+          nodes: ["agent", "daemon", "tracker"],
+        },
+        {
+          title: "Codex reports progress",
+          copy: "Turn events, blockers, and token data stream from app-server back to Symphony.",
+          path: "appserverToDaemon",
+          color: "#d282d9",
+          nodes: ["appserver", "daemon"],
+        },
+        {
+          title: "Dashboard updates",
+          copy: "Symphony publishes running, blocked, retry, and completion status.",
+          path: "daemonToDashboard",
+          color: "#7da8ff",
+          nodes: ["daemon", "dashboard"],
+        },
+        {
+          title: "Continue or retry",
+          copy: "If the ticket is still active, Symphony starts another turn or schedules a retry.",
+          path: "retryToAppserver",
+          color: "#ff7d7d",
+          nodes: ["daemon", "appserver"],
+        },
+      ];
+
+      const packet = document.querySelector("#packet");
+      const stepList = document.querySelector("#steps");
+      const statusTitle = document.querySelector("#statusTitle");
+      const statusCopy = document.querySelector("#statusCopy");
+      const playBtn = document.querySelector("#playBtn");
+      const nextBtn = document.querySelector("#nextBtn");
+      const prevBtn = document.querySelector("#prevBtn");
+      let currentStep = -1;
+      let playing = false;
+      let animationFrame = null;
+
+      function createStepList() {
+        steps.forEach((step, index) => {
+          const item = document.createElement("li");
+          item.style.setProperty("--step-color", step.color);
+          item.innerHTML = `
+            <span class="step-number">${index + 1}</span>
+            <span>
+              <span class="step-title">${step.title}</span>
+              <span class="step-copy">${step.copy}</span>
+            </span>
+          `;
+          item.addEventListener("click", () => {
+            playing = false;
+            updatePlayButton();
+            runStep(index);
+          });
+          stepList.appendChild(item);
+        });
+      }
+
+      function setActiveStep(index) {
+        currentStep = index;
+        const step = steps[index];
+        statusTitle.textContent = `${index + 1}. ${step.title}`;
+        statusCopy.textContent = step.copy;
+
+        document.querySelectorAll(".steps li").forEach((item, itemIndex) => {
+          item.classList.toggle("active", itemIndex === index);
+        });
+
+        document.querySelectorAll(".node, .zone").forEach((node) => {
+          const nodeNames = (node.dataset.node || "").split(" ");
+          node.classList.toggle("active", step.nodes.some((name) => nodeNames.includes(name)));
+        });
+
+        document.querySelectorAll(".flow-line").forEach((line) => {
+          line.classList.toggle("active", line.id === step.path);
+          line.style.setProperty("--active-color", step.color);
+        });
+      }
+
+      function runStep(index) {
+        if (animationFrame) {
+          cancelAnimationFrame(animationFrame);
+          animationFrame = null;
+        }
+
+        const safeIndex = (index + steps.length) % steps.length;
+        setActiveStep(safeIndex);
+        animatePath(steps[safeIndex]);
+      }
+
+      function animatePath(step) {
+        const path = document.querySelector(`#${step.path}`);
+        const length = path.getTotalLength();
+        const duration = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 1 : 1350;
+        const started = performance.now();
+
+        packet.classList.add("visible");
+        packet.style.color = step.color;
+
+        function tick(now) {
+          const progress = Math.min((now - started) / duration, 1);
+          const eased = 1 - Math.pow(1 - progress, 3);
+          const point = path.getPointAtLength(length * eased);
+          packet.setAttribute("cx", point.x);
+          packet.setAttribute("cy", point.y);
+
+          if (progress < 1) {
+            animationFrame = requestAnimationFrame(tick);
+          } else {
+            packet.classList.remove("visible");
+            animationFrame = null;
+            if (playing) {
+              window.setTimeout(() => runStep(currentStep + 1), 420);
+            }
+          }
+        }
+
+        animationFrame = requestAnimationFrame(tick);
+      }
+
+      function updatePlayButton() {
+        playBtn.textContent = playing ? "Pause" : "Play";
+      }
+
+      playBtn.addEventListener("click", () => {
+        playing = !playing;
+        updatePlayButton();
+        if (playing && animationFrame === null) {
+          runStep(currentStep + 1);
+        }
+      });
+
+      nextBtn.addEventListener("click", () => {
+        playing = false;
+        updatePlayButton();
+        runStep(currentStep + 1);
+      });
+
+      prevBtn.addEventListener("click", () => {
+        playing = false;
+        updatePlayButton();
+        runStep(currentStep - 1);
+      });
+
+      createStepList();
+      runStep(0);
+    </script>
+  </body>
+</html>

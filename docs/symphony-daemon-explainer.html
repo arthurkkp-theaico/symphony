@@ -1,0 +1,2700 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Symphony Daemon Deep Dive</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&display=swap");
+
+      :root {
+        color-scheme: dark;
+        --bg: #121316;
+        --panel: #191b20;
+        --panel-2: #20232a;
+        --text: #f4f1ea;
+        --muted: #b8b0a1;
+        --soft: rgba(255, 255, 255, 0.07);
+        --line: #6b7484;
+        --tracker: #62d5c8;
+        --daemon: #f0b35a;
+        --workspace: #9dd66d;
+        --codex: #d282d9;
+        --agent: #f58ab6;
+        --dashboard: #7da8ff;
+        --tools: #8fd0ff;
+        --danger: #ff7d7d;
+        --shadow: 0 22px 70px rgba(0, 0, 0, 0.34);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at 18% 8%, rgba(98, 213, 200, 0.13), transparent 30%),
+          radial-gradient(circle at 88% 78%, rgba(210, 130, 217, 0.11), transparent 32%),
+          var(--bg);
+        color: var(--text);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+      }
+
+      a {
+        color: var(--tools);
+        text-underline-offset: 3px;
+      }
+
+      main {
+        width: min(1320px, calc(100vw - 36px));
+        margin: 0 auto;
+        padding: 28px 0 40px;
+      }
+
+      header {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 24px;
+        margin-bottom: 18px;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        max-width: 900px;
+        font-family:
+          "IBM Plex Sans Condensed", "Aptos Display", "Arial Narrow", "Helvetica Neue",
+          sans-serif;
+        font-size: clamp(30px, 4.4vw, 58px);
+        font-weight: 700;
+        line-height: 1.02;
+        letter-spacing: 0.01em;
+      }
+
+      h2 {
+        font-size: clamp(22px, 2.6vw, 32px);
+        line-height: 1.08;
+        letter-spacing: 0;
+      }
+
+      h2 a,
+      h3 a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      h3 {
+        font-size: 17px;
+        letter-spacing: 0;
+      }
+
+      .subtitle {
+        margin-top: 10px;
+        max-width: 760px;
+        font-family:
+          "IBM Plex Sans", "Aptos", "Helvetica Neue", Arial,
+          sans-serif;
+        font-weight: 400;
+        color: var(--muted);
+        font-size: 16px;
+        line-height: 1.5;
+        letter-spacing: 0.005em;
+      }
+
+      .shell {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 340px;
+        gap: 18px;
+        align-items: stretch;
+      }
+
+      .stage {
+        position: relative;
+        min-height: 760px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        background:
+          linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+          rgba(16, 18, 22, 0.82);
+        background-size: 36px 36px;
+        box-shadow: var(--shadow);
+      }
+
+      .map {
+        position: absolute;
+        inset: 0;
+        z-index: 2;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+      }
+
+      .zone {
+        position: absolute;
+        z-index: 1;
+        border: 1.5px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.025);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.025);
+        transition:
+          border-color 180ms ease,
+          background 180ms ease,
+          box-shadow 180ms ease;
+      }
+
+      .zone::before {
+        content: attr(data-label);
+        position: absolute;
+        top: 12px;
+        left: 14px;
+        padding: 4px 8px;
+        border-radius: 6px;
+        background: rgba(18, 19, 22, 0.86);
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .zone.active {
+        border-color: color-mix(in srgb, var(--zone-color), transparent 28%);
+        background: color-mix(in srgb, var(--zone-color), transparent 94%);
+        box-shadow:
+          inset 0 0 0 1px color-mix(in srgb, var(--zone-color), transparent 82%),
+          0 0 36px color-mix(in srgb, var(--zone-color), transparent 88%);
+      }
+
+      .zone-tracker {
+        left: 3.5%;
+        top: 28%;
+        width: 25.5%;
+        height: 48%;
+        --zone-color: var(--tracker);
+      }
+
+      .zone-daemon {
+        left: 31%;
+        top: 8%;
+        width: 31.5%;
+        height: 83%;
+        --zone-color: var(--daemon);
+      }
+
+      .zone-worker {
+        right: 3.5%;
+        top: 7%;
+        width: 31.5%;
+        height: 86%;
+        --zone-color: var(--codex);
+      }
+
+      .flow-line {
+        fill: none;
+        stroke: var(--line);
+        stroke-width: 3;
+        stroke-linecap: butt;
+        stroke-linejoin: miter;
+        opacity: 0.25;
+        shape-rendering: geometricPrecision;
+        vector-effect: non-scaling-stroke;
+        transition:
+          stroke 220ms ease,
+          opacity 220ms ease,
+          stroke-width 220ms ease;
+      }
+
+      .flow-line.active {
+        stroke: var(--active-color, var(--daemon));
+        stroke-width: 3;
+        opacity: 0.98;
+        filter: drop-shadow(0 0 10px color-mix(in srgb, var(--active-color), transparent 45%));
+      }
+
+      .packet {
+        opacity: 0;
+        filter: drop-shadow(0 0 14px currentColor);
+      }
+
+      .packet.visible {
+        opacity: 1;
+      }
+
+      .node {
+        position: absolute;
+        z-index: 3;
+        width: 25%;
+        height: 22%;
+        padding: 18px;
+        border: 1.5px solid color-mix(in srgb, var(--accent), rgba(255, 255, 255, 0.12) 38%);
+        border-radius: 8px;
+        background:
+          linear-gradient(180deg, color-mix(in srgb, var(--accent), transparent 94%), transparent),
+          rgba(28, 31, 38, 0.96);
+        box-shadow:
+          0 16px 44px rgba(0, 0, 0, 0.28),
+          inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+        transition:
+          border-color 180ms ease,
+          transform 180ms ease,
+          box-shadow 180ms ease,
+          background 180ms ease;
+      }
+
+      .node.active {
+        transform: translateY(-4px);
+        border-color: var(--accent);
+        background:
+          linear-gradient(180deg, color-mix(in srgb, var(--accent), transparent 90%), transparent),
+          rgba(30, 33, 40, 0.98);
+        box-shadow:
+          0 18px 58px rgba(0, 0, 0, 0.35),
+          0 0 0 3px color-mix(in srgb, var(--accent), transparent 82%);
+      }
+
+      .kicker,
+      .mini-kicker,
+      .legend span {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .kicker,
+      .mini-kicker {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .dot {
+        width: 10px;
+        height: 10px;
+        flex: 0 0 auto;
+        border-radius: 999px;
+        background: var(--accent);
+        box-shadow: 0 0 18px var(--accent);
+      }
+
+      .node h2 {
+        margin: 12px 0 8px;
+        font-size: 21px;
+        line-height: 1.1;
+        letter-spacing: 0;
+      }
+
+      .node p {
+        color: var(--muted);
+        font-size: 13.5px;
+        line-height: 1.35;
+      }
+
+      .tracker {
+        left: 5%;
+        top: 37%;
+        --accent: var(--tracker);
+      }
+
+      .daemon {
+        left: 34%;
+        top: 16.447%;
+        width: 29%;
+        height: 46.184%;
+        padding: 14px;
+        --accent: var(--daemon);
+      }
+
+      .daemon .kicker {
+        gap: 7px;
+        font-size: 10px;
+        letter-spacing: 0.075em;
+      }
+
+      .daemon .dot {
+        width: 9px;
+        height: 9px;
+      }
+
+      .daemon h2 {
+        margin: 8px 0 6px;
+        font-size: 19px;
+      }
+
+      .daemon p {
+        font-size: 12.25px;
+        line-height: 1.28;
+      }
+
+      .workspace {
+        right: 5%;
+        top: 13.026%;
+        height: 20%;
+        --accent: var(--workspace);
+      }
+
+      .appserver {
+        right: 5%;
+        top: 44.473%;
+        height: 19.079%;
+        --accent: var(--codex);
+      }
+
+      .agent {
+        right: 5%;
+        top: 71.974%;
+        height: 18.947%;
+        --accent: var(--agent);
+      }
+
+      .dashboard {
+        left: 35.5%;
+        top: 67.763%;
+        height: 17.763%;
+        --accent: var(--dashboard);
+      }
+
+      .module-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 7px;
+        margin-top: 11px;
+      }
+
+      .module-chip {
+        display: block;
+        min-height: 36px;
+        padding: 6px 7px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.045);
+        color: var(--muted);
+        font-size: 10px;
+        line-height: 1.15;
+        text-decoration: none;
+        transition:
+          border-color 180ms ease,
+          background 180ms ease,
+          color 180ms ease;
+      }
+
+      .module-chip strong {
+        display: block;
+        margin-bottom: 1px;
+        color: var(--text);
+        font-size: 10.5px;
+      }
+
+      .module-chip.active {
+        border-color: color-mix(in srgb, var(--accent, var(--daemon)), transparent 28%);
+        background: color-mix(in srgb, var(--accent, var(--daemon)), transparent 86%);
+        color: var(--text);
+      }
+
+      aside,
+      .panel,
+      .card,
+      .source-panel {
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        background: rgba(25, 27, 32, 0.92);
+        box-shadow: var(--shadow);
+      }
+
+      aside {
+        padding: 16px;
+      }
+
+      .controls {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+
+      button {
+        min-height: 40px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 8px;
+        background: var(--panel-2);
+        color: var(--text);
+        font: inherit;
+        font-size: 14px;
+        font-weight: 800;
+        cursor: pointer;
+        transition:
+          background 160ms ease,
+          border-color 160ms ease,
+          transform 160ms ease;
+      }
+
+      button:hover {
+        background: #2a2e37;
+        border-color: rgba(255, 255, 255, 0.24);
+      }
+
+      button:active {
+        transform: translateY(1px);
+      }
+
+      .primary {
+        background: var(--daemon);
+        color: #21170a;
+      }
+
+      .primary:hover {
+        background: #ffc36d;
+      }
+
+      .status {
+        min-height: 116px;
+        padding: 14px;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.055);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        margin-bottom: 14px;
+      }
+
+      .status strong {
+        display: block;
+        margin-bottom: 6px;
+        color: var(--text);
+        font-size: 15px;
+      }
+
+      .status p {
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.45;
+      }
+
+      .steps {
+        display: grid;
+        gap: 8px;
+        max-height: 392px;
+        margin: 0;
+        padding: 0 4px 0 0;
+        overflow: auto;
+        list-style: none;
+      }
+
+      .steps li {
+        display: grid;
+        grid-template-columns: 28px 1fr;
+        gap: 10px;
+        align-items: start;
+        min-height: 50px;
+        padding: 10px;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        color: var(--muted);
+        background: rgba(255, 255, 255, 0.035);
+        cursor: pointer;
+      }
+
+      .steps li.active {
+        color: var(--text);
+        border-color: color-mix(in srgb, var(--step-color), transparent 48%);
+        background: color-mix(in srgb, var(--step-color), transparent 88%);
+      }
+
+      .step-number {
+        display: grid;
+        place-items: center;
+        width: 28px;
+        height: 28px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 900;
+      }
+
+      .steps li.active .step-number {
+        background: var(--step-color);
+        color: #121316;
+      }
+
+      .step-title {
+        display: block;
+        margin-bottom: 2px;
+        font-size: 14px;
+        font-weight: 900;
+      }
+
+      .step-copy {
+        display: block;
+        font-size: 12px;
+        line-height: 1.35;
+      }
+
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 14px;
+        margin-top: 14px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .content-grid {
+        display: grid;
+        grid-template-columns: repeat(12, 1fr);
+        gap: 18px;
+        margin-top: 18px;
+      }
+
+      .workspace-runtime-panel {
+        margin-top: 18px;
+        padding: 20px;
+        border: 1px solid rgba(157, 214, 109, 0.18);
+        border-radius: 8px;
+        background:
+          linear-gradient(180deg, rgba(157, 214, 109, 0.055), transparent),
+          rgba(25, 27, 32, 0.92);
+        box-shadow: var(--shadow);
+      }
+
+      .long-horizon-panel {
+        margin-top: 18px;
+        padding: 20px;
+        border: 1px solid rgba(210, 130, 217, 0.18);
+        border-radius: 8px;
+        background:
+          linear-gradient(180deg, rgba(210, 130, 217, 0.055), transparent),
+          rgba(25, 27, 32, 0.92);
+        box-shadow: var(--shadow);
+      }
+
+      .appserver-turns-panel {
+        margin-top: 18px;
+        padding: 20px;
+        border: 1px solid rgba(210, 130, 217, 0.2);
+        border-radius: 8px;
+        background:
+          linear-gradient(180deg, rgba(125, 168, 255, 0.05), rgba(210, 130, 217, 0.04)),
+          rgba(25, 27, 32, 0.92);
+        box-shadow: var(--shadow);
+      }
+
+      .workspace-runtime-panel p {
+        margin-top: 8px;
+        max-width: 900px;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.48;
+      }
+
+      .long-horizon-panel p {
+        margin-top: 8px;
+        max-width: 940px;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.48;
+      }
+
+      .appserver-turns-panel p {
+        margin-top: 8px;
+        max-width: 960px;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.48;
+      }
+
+      .runtime-map {
+        display: grid;
+        grid-template-columns: 1.05fr 1fr 1fr 1.15fr;
+        gap: 10px;
+        margin-top: 16px;
+      }
+
+      .runtime-lane {
+        min-height: 178px;
+        padding: 14px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .runtime-lane h3 {
+        margin: 8px 0 10px;
+        font-size: 15px;
+      }
+
+      .runtime-lane ul {
+        display: grid;
+        gap: 7px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .runtime-lane li {
+        color: var(--muted);
+        font-size: 12.5px;
+        line-height: 1.35;
+      }
+
+      .runtime-flow {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .runtime-step {
+        min-height: 72px;
+        padding: 10px;
+        border: 1px solid color-mix(in srgb, var(--accent), transparent 66%);
+        border-radius: 8px;
+        background: color-mix(in srgb, var(--accent), transparent 94%);
+      }
+
+      .runtime-step strong {
+        display: block;
+        margin-bottom: 5px;
+        color: var(--text);
+        font-size: 12px;
+      }
+
+      .runtime-step span {
+        color: var(--muted);
+        font-size: 11.5px;
+        line-height: 1.25;
+      }
+
+      .horizon-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-top: 16px;
+      }
+
+      .horizon-card {
+        padding: 14px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .horizon-card h3 {
+        margin: 8px 0 10px;
+        font-size: 15px;
+      }
+
+      .horizon-card ul {
+        display: grid;
+        gap: 8px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .horizon-card li {
+        color: var(--muted);
+        font-size: 12.75px;
+        line-height: 1.38;
+      }
+
+      .prompt-highlights {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 12px;
+      }
+
+      .prompt-quote {
+        min-height: 126px;
+        padding: 12px;
+        border: 1px solid color-mix(in srgb, var(--accent), transparent 64%);
+        border-radius: 8px;
+        background: color-mix(in srgb, var(--accent), transparent 94%);
+      }
+
+      .prompt-quote strong {
+        display: block;
+        margin-bottom: 7px;
+        color: var(--text);
+        font-size: 12px;
+      }
+
+      .prompt-quote code {
+        display: block;
+        border: 0;
+        background: transparent;
+        padding: 0;
+        color: color-mix(in srgb, var(--accent), white 36%);
+        font-size: 11.25px;
+        line-height: 1.35;
+      }
+
+      .drawio-canvas {
+        position: relative;
+        margin-top: 16px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        background:
+          linear-gradient(rgba(255, 255, 255, 0.028) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.028) 1px, transparent 1px),
+          rgba(15, 17, 22, 0.64);
+        background-size: 28px 28px;
+      }
+
+      .workspace-diagram {
+        min-height: 760px;
+      }
+
+      .horizon-diagram {
+        min-height: 820px;
+      }
+
+      .appserver-diagram {
+        min-height: 920px;
+      }
+
+      .drawio-map {
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+      }
+
+      .drawio-line {
+        fill: none;
+        stroke: var(--line-color, #748093);
+        stroke-width: 2.5;
+        stroke-linecap: butt;
+        stroke-linejoin: miter;
+        opacity: 0.72;
+        shape-rendering: geometricPrecision;
+        vector-effect: non-scaling-stroke;
+      }
+
+      .drawio-line.flowing {
+        opacity: 0.98;
+        stroke-width: 3;
+        filter: drop-shadow(0 0 8px color-mix(in srgb, var(--line-color), transparent 50%));
+      }
+
+      .drawio-line.walk-active {
+        opacity: 1;
+        stroke-width: 3.25;
+        filter: drop-shadow(0 0 10px color-mix(in srgb, var(--line-color), transparent 42%));
+      }
+
+      .drawio-packet {
+        opacity: 0;
+        filter: drop-shadow(0 0 12px currentColor);
+        transition: opacity 160ms ease;
+      }
+
+      .drawio-packet.visible {
+        opacity: 1;
+      }
+
+      .drawio-boundary {
+        position: absolute;
+        z-index: 0;
+        border: 1.5px solid color-mix(in srgb, var(--accent), transparent 42%);
+        border-radius: 8px;
+        background: color-mix(in srgb, var(--accent), transparent 96%);
+        box-shadow:
+          inset 0 0 0 1px rgba(255, 255, 255, 0.03),
+          0 0 26px color-mix(in srgb, var(--accent), transparent 92%);
+      }
+
+      .drawio-boundary::before {
+        content: attr(data-label);
+        position: absolute;
+        top: -13px;
+        left: 12px;
+        padding: 4px 8px;
+        border-radius: 6px;
+        background: rgba(18, 19, 22, 0.9);
+        color: color-mix(in srgb, var(--accent), white 28%);
+        font-size: 10px;
+        font-weight: 900;
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+      }
+
+      .drawio-node {
+        position: absolute;
+        z-index: 2;
+        padding: 12px;
+        border: 1.5px solid color-mix(in srgb, var(--accent), rgba(255, 255, 255, 0.12) 35%);
+        border-radius: 8px;
+        background:
+          linear-gradient(180deg, color-mix(in srgb, var(--accent), transparent 94%), transparent),
+          rgba(28, 31, 38, 0.97);
+        box-shadow:
+          0 12px 34px rgba(0, 0, 0, 0.24),
+          inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+      }
+
+      .drawio-node.walk-active {
+        border-color: color-mix(in srgb, var(--accent), white 20%);
+        background:
+          linear-gradient(180deg, color-mix(in srgb, var(--accent), transparent 86%), transparent),
+          rgba(32, 35, 42, 0.98);
+        box-shadow:
+          0 14px 38px rgba(0, 0, 0, 0.3),
+          0 0 0 1px color-mix(in srgb, var(--accent), transparent 55%),
+          0 0 24px color-mix(in srgb, var(--accent), transparent 78%);
+      }
+
+      .drawio-boundary.walk-active {
+        border-color: color-mix(in srgb, var(--accent), white 12%);
+        background: color-mix(in srgb, var(--accent), transparent 92%);
+      }
+
+      .drawio-node h3 {
+        margin: 8px 0 5px;
+        font-size: 15px;
+      }
+
+      .drawio-node a {
+        color: color-mix(in srgb, var(--accent), white 25%);
+        text-decoration: none;
+      }
+
+      .drawio-node small {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.3;
+      }
+
+      .drawio-node .excerpt-list {
+        gap: 6px;
+        margin-top: 9px;
+      }
+
+      .drawio-node .excerpt {
+        padding: 7px;
+        font-size: 10.25px;
+      }
+
+      .drawio-node .contribution {
+        margin-top: 8px;
+        padding: 8px;
+        font-size: 11px;
+      }
+
+      .flow-note {
+        position: absolute;
+        z-index: 3;
+        padding: 5px 8px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 999px;
+        background: rgba(18, 19, 22, 0.9);
+        color: var(--muted);
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .diagram-walkthrough {
+        display: grid;
+        grid-template-columns: 260px minmax(0, 1fr);
+        gap: 12px;
+        margin-top: 12px;
+        padding: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .walkthrough-controls {
+        display: grid;
+        gap: 10px;
+        align-content: start;
+      }
+
+      .walkthrough-buttons {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 7px;
+      }
+
+      .walkthrough-buttons button {
+        min-height: 34px;
+        padding: 8px 9px;
+        font-size: 11px;
+      }
+
+      .walkthrough-status {
+        min-height: 112px;
+        padding: 12px;
+        border: 1px solid color-mix(in srgb, var(--walk-color, var(--daemon)), transparent 70%);
+        border-radius: 8px;
+        background: color-mix(in srgb, var(--walk-color, var(--daemon)), transparent 93%);
+      }
+
+      .walkthrough-status strong {
+        display: block;
+        margin-bottom: 6px;
+        color: var(--text);
+        font-size: 13px;
+      }
+
+      .walkthrough-status p {
+        color: var(--muted);
+        font-size: 12.5px;
+        line-height: 1.42;
+      }
+
+      .walkthrough-steps {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 8px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .walkthrough-steps li {
+        display: grid;
+        grid-template-columns: 24px 1fr;
+        gap: 8px;
+        min-height: 74px;
+        padding: 9px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.035);
+        color: var(--muted);
+        cursor: pointer;
+      }
+
+      .walkthrough-steps li.active {
+        border-color: color-mix(in srgb, var(--step-color), transparent 35%);
+        background: color-mix(in srgb, var(--step-color), transparent 90%);
+        color: var(--text);
+      }
+
+      .walkthrough-steps .step-number {
+        width: 24px;
+        height: 24px;
+        font-size: 11px;
+      }
+
+      .walkthrough-steps .step-title {
+        font-size: 12px;
+      }
+
+      .walkthrough-steps .step-copy {
+        font-size: 11px;
+      }
+
+      .wr-agent { left: 3%; top: 34.2%; width: 16.5%; height: 19%; }
+      .wr-create { left: 24%; top: 34.2%; width: 20%; height: 23%; }
+      .wr-decision { left: 48%; top: 34.2%; width: 13%; height: 16%; }
+      .wr-local { left: 66%; top: 8%; width: 30%; height: 29.6%; }
+      .wr-remote { left: 66%; top: 43%; width: 30%; height: 26.3%; }
+      .wr-hooks { left: 30%; top: 72%; width: 28%; height: 15%; }
+      .wr-codex { left: 65%; top: 72%; width: 31%; height: 21%; }
+      .wr-note-local { left: 62%; top: 20%; }
+      .wr-note-remote { left: 62%; top: 55%; }
+
+      .hz-workflow { left: 3%; top: 8%; width: 18%; min-height: 250px; }
+      .hz-prompt { left: 25%; top: 8%; width: 18%; min-height: 250px; }
+      .hz-app { left: 47%; top: 8%; width: 18%; min-height: 250px; }
+      .hz-runner { left: 69%; top: 8%; width: 27%; min-height: 250px; }
+      .hz-orchestrator { left: 69%; top: 52%; width: 27%; min-height: 170px; }
+      .hz-note-turns { left: 81%; top: 2.5%; }
+      .hz-note-retry { left: 50%; top: 61%; }
+
+      .as-runner { left: 3%; top: 35%; width: 18%; height: 21%; }
+      .as-start { left: 25%; top: 10%; width: 18%; height: 24%; }
+      .as-process { left: 47%; top: 10%; width: 18%; height: 24%; }
+      .as-thread { left: 70%; top: 10%; width: 26%; height: 27%; }
+      .as-turn { left: 47%; top: 44%; width: 18%; height: 27%; }
+      .as-stream { left: 70%; top: 44%; width: 26%; height: 29%; }
+      .as-tools { left: 70%; top: 77%; width: 26%; height: 18%; }
+      .as-decision { left: 25%; top: 72%; width: 18%; height: 20%; }
+      .as-stop { left: 3%; top: 74%; width: 18%; height: 17%; }
+      .as-note-session { left: 73%; top: 36%; }
+      .as-note-loop { left: 37%; top: 60%; }
+      .as-boundary-daemon { left: 1.5%; top: 5%; width: 42.5%; height: 90%; --accent: var(--agent); }
+      .as-boundary-appserver { left: 45%; top: 5%; width: 53%; height: 35%; --accent: var(--codex); }
+      .as-boundary-codex { left: 45%; top: 42%; width: 53%; height: 54%; --accent: var(--dashboard); }
+
+      .appserver-diagram .drawio-node {
+        padding: 10px;
+      }
+
+      .appserver-diagram .drawio-node h3 {
+        font-size: 14px;
+      }
+
+      .appserver-diagram .drawio-node small {
+        font-size: 10.25px;
+        line-height: 1.26;
+      }
+
+      .appserver-diagram .drawio-node .excerpt-list {
+        gap: 5px;
+        margin-top: 7px;
+      }
+
+      .appserver-diagram .drawio-node .excerpt {
+        padding: 6px;
+        font-size: 9.3px;
+        line-height: 1.2;
+      }
+
+      .source-proof-grid {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 16px;
+      }
+
+      .source-file-card {
+        min-height: 290px;
+        padding: 13px;
+        border: 1px solid color-mix(in srgb, var(--accent), transparent 68%);
+        border-radius: 8px;
+        background:
+          linear-gradient(180deg, color-mix(in srgb, var(--accent), transparent 94%), transparent),
+          rgba(255, 255, 255, 0.035);
+      }
+
+      .source-file-card h3 {
+        margin: 8px 0 4px;
+        font-size: 14px;
+      }
+
+      .source-file-card a {
+        color: color-mix(in srgb, var(--accent), white 25%);
+        text-decoration: none;
+      }
+
+      .source-file-card small {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.35;
+      }
+
+      .excerpt-list {
+        display: grid;
+        gap: 7px;
+        margin-top: 12px;
+      }
+
+      .excerpt {
+        display: block;
+        padding: 8px;
+        border-left: 3px solid var(--accent);
+        border-radius: 6px;
+        background: rgba(0, 0, 0, 0.22);
+        color: #eadfce;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        font-size: 10.5px;
+        line-height: 1.35;
+      }
+
+      .excerpt .hl {
+        color: var(--text);
+        background: color-mix(in srgb, var(--accent), transparent 78%);
+        border-radius: 4px;
+        padding: 0 3px;
+      }
+
+      .contribution {
+        margin-top: 10px;
+        padding: 9px;
+        border: 1px solid color-mix(in srgb, var(--accent), transparent 72%);
+        border-radius: 7px;
+        background: color-mix(in srgb, var(--accent), transparent 92%);
+        color: var(--text);
+        font-size: 11.5px;
+        line-height: 1.35;
+      }
+
+      .behavior-chain {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .behavior-node {
+        min-height: 82px;
+        padding: 10px;
+        border: 1px solid color-mix(in srgb, var(--accent), transparent 66%);
+        border-radius: 8px;
+        background: color-mix(in srgb, var(--accent), transparent 94%);
+      }
+
+      .behavior-node strong {
+        display: block;
+        margin-bottom: 5px;
+        color: var(--text);
+        font-size: 12px;
+      }
+
+      .behavior-node span {
+        color: var(--muted);
+        font-size: 11.5px;
+        line-height: 1.3;
+      }
+
+      .panel,
+      .source-panel {
+        padding: 20px;
+      }
+
+      .panel.wide {
+        grid-column: span 8;
+      }
+
+      .panel.narrow {
+        grid-column: span 4;
+      }
+
+      .panel.full {
+        grid-column: span 12;
+      }
+
+      .card {
+        grid-column: span 4;
+        padding: 18px;
+      }
+
+      .card p,
+      .panel p,
+      .source-panel p,
+      .source-panel li {
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.48;
+      }
+
+      .card h3 {
+        margin: 10px 0 8px;
+      }
+
+      .mini-kicker {
+        color: color-mix(in srgb, var(--accent), white 20%);
+      }
+
+      .workspace-sequence {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 16px;
+      }
+
+      .detail-card {
+        min-height: 136px;
+        padding: 13px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.035);
+        transition:
+          border-color 180ms ease,
+          background 180ms ease,
+          transform 180ms ease;
+      }
+
+      .detail-card.active {
+        transform: translateY(-2px);
+        border-color: color-mix(in srgb, var(--accent), transparent 35%);
+        background: color-mix(in srgb, var(--accent), transparent 91%);
+      }
+
+      .detail-card strong {
+        display: block;
+        margin: 8px 0 6px;
+        color: var(--text);
+        font-size: 14px;
+      }
+
+      .detail-card p {
+        font-size: 12.5px;
+        line-height: 1.4;
+      }
+
+      table {
+        width: 100%;
+        margin-top: 16px;
+        border-collapse: collapse;
+      }
+
+      th,
+      td {
+        padding: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.05);
+        font-size: 12px;
+        text-transform: uppercase;
+      }
+
+      td {
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.45;
+      }
+
+      code {
+        padding: 2px 5px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 5px;
+        background: rgba(255, 255, 255, 0.06);
+        color: #f6e5bd;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        font-size: 0.9em;
+        overflow-wrap: anywhere;
+        white-space: normal;
+      }
+
+      .code-link,
+      .code-link:visited {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .code-link code {
+        border-color: color-mix(in srgb, currentColor, rgba(255, 255, 255, 0.1) 70%);
+        color: #ffe9b8;
+      }
+
+      .code-link:hover code,
+      .drawio-node a:hover,
+      .source-panel a:hover {
+        border-color: color-mix(in srgb, var(--accent, var(--daemon)), white 26%);
+        color: var(--text);
+      }
+
+      .source-panel {
+        margin-top: 18px;
+      }
+
+      .source-panel ol {
+        margin: 12px 0 0;
+        padding-left: 22px;
+      }
+
+      @media (max-width: 1120px) {
+        .shell {
+          grid-template-columns: 1fr;
+        }
+
+        aside {
+          order: -1;
+        }
+
+        .workspace-sequence {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .runtime-map,
+        .runtime-flow {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .source-proof-grid,
+        .behavior-chain {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .horizon-grid,
+        .prompt-highlights,
+        .drawio-canvas {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .diagram-walkthrough {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 760px) {
+        main {
+          width: min(100vw - 24px, 1220px);
+          padding-top: 18px;
+        }
+
+        header {
+          display: block;
+        }
+
+        .stage {
+          min-height: 1280px;
+        }
+
+        .map,
+        .zone {
+          display: none;
+        }
+
+        .node {
+          left: 50% !important;
+          right: auto !important;
+          width: min(292px, calc(100% - 36px)) !important;
+          height: auto !important;
+          min-height: 116px;
+          transform: translateX(-50%);
+        }
+
+        .node.active {
+          transform: translateX(-50%) translateY(-3px);
+        }
+
+        .tracker { top: 3%; }
+        .daemon { top: 15%; }
+        .workspace { top: 47%; }
+        .appserver { top: 60%; }
+        .agent { top: 73%; }
+        .dashboard { top: 86%; }
+
+        .panel.wide,
+        .panel.narrow,
+        .card {
+          grid-column: span 12;
+        }
+
+        .workspace-sequence {
+          grid-template-columns: 1fr;
+        }
+
+        .runtime-map,
+        .runtime-flow {
+          grid-template-columns: 1fr;
+        }
+
+        .drawio-canvas {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 10px;
+          min-height: auto;
+          padding: 12px;
+        }
+
+        .drawio-map,
+        .drawio-boundary,
+        .flow-note {
+          display: none;
+        }
+
+        .drawio-node {
+          position: relative !important;
+          left: auto !important;
+          top: auto !important;
+          width: auto !important;
+          min-height: 0;
+        }
+
+        .horizon-grid,
+        .prompt-highlights,
+        .source-proof-grid,
+        .behavior-chain,
+        .walkthrough-steps {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation-duration: 0.001ms !important;
+          animation-iteration-count: 1 !important;
+          scroll-behavior: auto !important;
+          transition-duration: 0.001ms !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>Symphony daemon deep dive</h1>
+          <p class="subtitle">
+            Same runtime boundaries as the orchestration map, with the Symphony daemon expanded to
+            show how it creates workspaces, launches Codex, and keeps operator state coherent.
+          </p>
+        </div>
+      </header>
+
+      <section class="shell" aria-label="Animated Symphony daemon architecture map">
+        <div class="stage">
+          <div class="zone zone-tracker" data-node="tracker" data-label="External control plane"></div>
+          <div class="zone zone-daemon" data-node="daemon dashboard" data-label="Symphony process"></div>
+          <div class="zone zone-worker" data-node="workspace appserver agent" data-label="Worker environment"></div>
+
+          <svg class="map" viewBox="0 0 1000 760" preserveAspectRatio="none" role="img" aria-label="Symphony daemon flow map">
+            <defs>
+              <marker
+                id="arrow"
+                markerWidth="14"
+                markerHeight="14"
+                refX="12"
+                refY="7"
+                orient="auto"
+                markerUnits="userSpaceOnUse"
+              >
+                <path d="M1,1 L1,13 L13,7 z" fill="context-stroke"></path>
+              </marker>
+            </defs>
+
+            <path id="ticketToDaemon" class="flow-line" d="M300 365 H340" marker-end="url(#arrow)"></path>
+            <path id="daemonToTracker" class="flow-line" d="M340 410 H300" marker-end="url(#arrow)"></path>
+            <path id="daemonToWorkspace" class="flow-line" d="M630 190 H700" marker-end="url(#arrow)"></path>
+            <path id="daemonToAppserver" class="flow-line" d="M630 380 H700" marker-end="url(#arrow)"></path>
+            <path id="workspaceToAppserver" class="flow-line" d="M825 251 V338" marker-end="url(#arrow)"></path>
+            <path id="appserverToAgent" class="flow-line" d="M825 483 V547" marker-end="url(#arrow)"></path>
+            <path id="agentToWorkspace" class="flow-line" d="M950 618 H975 V174 H950" marker-end="url(#arrow)"></path>
+            <path id="agentToTracker" class="flow-line" d="M700 640 H670 V730 H180 V448" marker-end="url(#arrow)"></path>
+            <path id="appserverToDaemon" class="flow-line" d="M700 430 H630" marker-end="url(#arrow)"></path>
+            <path id="daemonToDashboard" class="flow-line" d="M500 476 V515" marker-end="url(#arrow)"></path>
+            <path id="retryToAppserver" class="flow-line" d="M630 462 H700" marker-end="url(#arrow)"></path>
+
+            <circle id="packet" class="packet" r="8" fill="currentColor"></circle>
+          </svg>
+
+          <article class="node tracker" data-node="tracker">
+            <div class="kicker"><span class="dot"></span>Control plane</div>
+            <h2><a href="../elixir/lib/symphony_elixir/tracker.ex">Issue Tracker</a></h2>
+            <p>Linear or Jira owns issue state, comments, labels, and handoff status.</p>
+          </article>
+
+          <article class="node daemon" data-node="daemon">
+            <div class="kicker"><span class="dot"></span>Elixir / BEAM runtime</div>
+            <h2><a href="../elixir/lib/symphony_elixir/orchestrator.ex">Symphony Daemon</a></h2>
+            <p>Schedules work, creates workspaces, and bridges to Codex.</p>
+            <div class="module-grid" aria-label="Daemon internals">
+              <a class="module-chip" href="../elixir/lib/symphony_elixir/workflow_store.ex" data-node="workflow" style="--accent: var(--daemon)"><strong>WorkflowStore</strong>Reloads policy</a>
+              <a class="module-chip" href="../elixir/lib/symphony_elixir/config.ex" data-node="config" style="--accent: var(--daemon)"><strong>Config</strong>Runtime settings</a>
+              <a class="module-chip" href="../elixir/lib/symphony_elixir/orchestrator.ex" data-node="orchestrator" style="--accent: var(--daemon)"><strong>Orchestrator</strong>Poll, claim, retry</a>
+              <a class="module-chip" href="../elixir/lib/symphony_elixir/workspace.ex" data-node="workspace-core" style="--accent: var(--workspace)"><strong>Workspace</strong>Create dirs</a>
+              <a class="module-chip" href="../elixir/lib/symphony_elixir/agent_runner.ex" data-node="runner" style="--accent: var(--agent)"><strong>AgentRunner</strong>Run attempt</a>
+              <a class="module-chip" href="../elixir/lib/symphony_elixir/codex/app_server.ex" data-node="app-client" style="--accent: var(--codex)"><strong>AppServer client</strong>JSON-RPC</a>
+              <a class="module-chip" href="../elixir/lib/symphony_elixir/codex/dynamic_tool.ex" data-node="tools" style="--accent: var(--tools)"><strong>Dynamic tools</strong>Tracker calls</a>
+              <a class="module-chip" href="../elixir/lib/symphony_elixir/status_dashboard.ex" data-node="dashboard-api" style="--accent: var(--dashboard)"><strong>PubSub / API</strong>Status feed</a>
+            </div>
+          </article>
+
+          <article class="node workspace" data-node="workspace">
+            <div class="kicker"><span class="dot"></span>Isolation</div>
+            <h2><a href="../elixir/lib/symphony_elixir/workspace.ex">Workspace</a></h2>
+            <p>Per-issue filesystem directory under <code>workspace.root</code>; Codex runs from here.</p>
+          </article>
+
+          <article class="node appserver" data-node="appserver">
+            <div class="kicker"><span class="dot"></span>Spawned process</div>
+            <h2><a href="../elixir/lib/symphony_elixir/codex/app_server.ex">codex app-server</a></h2>
+            <p>External subprocess launched outside the BEAM runtime, with cwd set to the workspace.</p>
+          </article>
+
+          <article class="node agent" data-node="agent">
+            <div class="kicker"><span class="dot"></span>Agent turn runtime</div>
+            <h2>Codex agent</h2>
+            <p>Edits, tests, tool-calls, and reports progress through app-server messages.</p>
+          </article>
+
+          <article class="node dashboard" data-node="dashboard">
+            <div class="kicker"><span class="dot"></span>Visibility</div>
+            <h2><a href="../elixir/lib/symphony_elixir/status_dashboard.ex">Dashboard / API</a></h2>
+            <p>Phoenix surfaces running sessions, blocks, retries, paths, and token totals.</p>
+          </article>
+        </div>
+
+        <aside>
+          <div class="controls" aria-label="Animation controls">
+            <button id="prevBtn" type="button">Back</button>
+            <button id="playBtn" type="button" class="primary">Play</button>
+            <button id="nextBtn" type="button">Next</button>
+          </div>
+
+          <div class="status" aria-live="polite">
+            <strong id="statusTitle">Ready</strong>
+            <p id="statusCopy">Press Play to animate the daemon lifecycle, or click a step below.</p>
+          </div>
+
+          <ol id="steps" class="steps"></ol>
+
+          <div class="legend" aria-label="Legend">
+            <span><span class="dot" style="--accent: var(--tracker)"></span>Tracker</span>
+            <span><span class="dot" style="--accent: var(--daemon)"></span>Daemon</span>
+            <span><span class="dot" style="--accent: var(--workspace)"></span>Workspace</span>
+            <span><span class="dot" style="--accent: var(--codex)"></span>App-server</span>
+            <span><span class="dot" style="--accent: var(--agent)"></span>Agent</span>
+            <span><span class="dot" style="--accent: var(--dashboard)"></span>Dashboard</span>
+          </div>
+        </aside>
+      </section>
+
+      <section class="workspace-runtime-panel" aria-label="Workspace creation runtime">
+        <div class="mini-kicker" style="--accent: var(--workspace)"><span class="dot"></span>Workspace creation runtime</div>
+        <h2>Programmatic directory creation before Codex starts</h2>
+        <p>
+          A workspace is not created by Codex. Symphony creates or reuses it first, then launches
+          <a class="code-link" href="../elixir/lib/symphony_elixir/codex/app_server.ex"><code>codex app-server</code></a>
+          with that directory as the working directory.
+        </p>
+
+        <div class="drawio-canvas workspace-diagram" data-animate-flow="true" aria-label="Draw.io style workspace creation flow">
+          <svg class="drawio-map" viewBox="0 0 1000 760" preserveAspectRatio="none" role="img" aria-label="Workspace creation flow diagram">
+            <defs>
+              <marker id="workspaceArrow" markerWidth="13" markerHeight="13" refX="11" refY="6.5" orient="auto" markerUnits="userSpaceOnUse">
+                <path d="M1,1 L1,12 L12,6.5 z" fill="context-stroke"></path>
+              </marker>
+            </defs>
+            <path id="wrRequest" class="drawio-line" d="M195 320 H240" marker-end="url(#workspaceArrow)" style="--line-color: var(--agent)"></path>
+            <path id="wrResolve" class="drawio-line" d="M440 320 H480" marker-end="url(#workspaceArrow)" style="--line-color: var(--workspace)"></path>
+            <path id="wrLocalBranch" class="drawio-line" d="M610 295 H635 V155 H660" marker-end="url(#workspaceArrow)" style="--line-color: var(--workspace)"></path>
+            <path id="wrRemoteBranch" class="drawio-line" d="M610 345 H635 V422 H660" marker-end="url(#workspaceArrow)" style="--line-color: var(--tools)"></path>
+            <path id="wrLocalHooks" class="drawio-line" d="M810 285 V520 H440 V547" marker-end="url(#workspaceArrow)" style="--line-color: var(--workspace)"></path>
+            <path id="wrRemoteHooks" class="drawio-line" d="M760 527 H580 V547" marker-end="url(#workspaceArrow)" style="--line-color: var(--tools)"></path>
+            <path id="wrStartCodex" class="drawio-line" d="M580 607 H650" marker-end="url(#workspaceArrow)" style="--line-color: var(--codex)"></path>
+          </svg>
+
+          <div class="flow-note wr-note-local">worker_host nil</div>
+          <div class="flow-note wr-note-remote">worker_host set</div>
+
+          <article class="drawio-node wr-agent" style="--accent: var(--agent)">
+            <div class="mini-kicker"><span class="dot"></span>Daemon</div>
+            <h3><a href="../elixir/lib/symphony_elixir/agent_runner.ex">AgentRunner</a></h3>
+            <small>Worker attempt starts here.</small>
+            <div class="excerpt-list">
+              <code class="excerpt">Workspace.<span class="hl">create_for_issue</span>(issue, worker_host)</code>
+            </div>
+          </article>
+
+          <article class="drawio-node wr-create" style="--accent: var(--workspace)">
+            <div class="mini-kicker"><span class="dot"></span>Workspace module</div>
+            <h3><a href="../elixir/lib/symphony_elixir/workspace.ex">Resolve safe path</a></h3>
+            <small>Builds the per-issue directory name.</small>
+            <div class="excerpt-list">
+              <code class="excerpt"><span class="hl">safe_identifier</span>(issue.identifier)</code>
+              <code class="excerpt">workspace.root / <span class="hl">safe_id</span></code>
+            </div>
+          </article>
+
+          <article class="drawio-node wr-decision" style="--accent: var(--daemon)">
+            <div class="mini-kicker"><span class="dot"></span>Branch</div>
+            <h3>Local or SSH?</h3>
+            <small>Selected by <code>worker_host</code>.</small>
+          </article>
+
+          <article class="drawio-node wr-local" style="--accent: var(--workspace)">
+            <div class="mini-kicker"><span class="dot"></span>Local host</div>
+            <h3><a href="../elixir/lib/symphony_elixir/workspace.ex">Filesystem mode</a></h3>
+            <small>Direct OS filesystem calls under the configured root.</small>
+            <div class="excerpt-list">
+              <code class="excerpt"><span class="hl">PathSafety.canonicalize</span>()</code>
+              <code class="excerpt"><span class="hl">File.mkdir_p!</span>(workspace)</code>
+            </div>
+            <div class="contribution">Rejects path escapes, reuses existing directories, and creates missing paths.</div>
+          </article>
+
+          <article class="drawio-node wr-remote" style="--accent: var(--tools)">
+            <div class="mini-kicker"><span class="dot"></span>Remote host</div>
+            <h3><a href="../elixir/lib/symphony_elixir/workspace.ex">SSH mode</a></h3>
+            <small>Daemon sends a shell script to the worker host.</small>
+            <div class="excerpt-list">
+              <code class="excerpt"><span class="hl">SSH.run</span>(worker_host, script)</code>
+              <code class="excerpt"><span class="hl">mkdir -p</span> "$workspace"</code>
+              <code class="excerpt"><span class="hl">pwd -P</span></code>
+            </div>
+          </article>
+
+          <article class="drawio-node wr-hooks" style="--accent: var(--daemon)">
+            <div class="mini-kicker"><span class="dot"></span>Hooks</div>
+            <h3><a href="../elixir/lib/symphony_elixir/workspace.ex">Prepare repo</a></h3>
+            <small><code>after_create</code> runs only for fresh directories; <code>before_run</code> runs before Codex.</small>
+          </article>
+
+          <article class="drawio-node wr-codex" style="--accent: var(--codex)">
+            <div class="mini-kicker"><span class="dot"></span>Codex</div>
+            <h3><a href="../elixir/lib/symphony_elixir/codex/app_server.ex">Start app-server in cwd</a></h3>
+            <small>App-server thread and turn start with <code>cwd = workspace</code>.</small>
+            <div class="contribution">All edits, commands, tests, and tool effects happen inside that isolated directory.</div>
+          </article>
+        </div>
+
+        <div class="diagram-walkthrough" id="workspaceWalkthrough" aria-label="Workspace diagram walkthrough">
+          <div class="walkthrough-controls">
+            <div class="walkthrough-buttons">
+              <button type="button" data-action="prev">Back</button>
+              <button type="button" data-action="play" class="primary">Play</button>
+              <button type="button" data-action="next">Next</button>
+            </div>
+            <div class="walkthrough-status" aria-live="polite">
+              <strong data-role="title">Ready</strong>
+              <p data-role="copy">Press Play to walk through workspace creation.</p>
+            </div>
+          </div>
+          <ol class="walkthrough-steps" data-role="steps"></ol>
+        </div>
+      </section>
+
+      <section class="content-grid" aria-label="Workspace creation drill-down">
+        <article class="panel full">
+          <h2>How workspaces are actually created</h2>
+          <p>
+            The orchestrator dispatches an issue to
+            <a class="code-link" href="../elixir/lib/symphony_elixir/agent_runner.ex"><code>AgentRunner</code></a>.
+            Before any Codex turn starts,
+            <a class="code-link" href="../elixir/lib/symphony_elixir/agent_runner.ex"><code>AgentRunner</code></a>
+            calls
+            <a class="code-link" href="../elixir/lib/symphony_elixir/workspace.ex"><code>Workspace.create_for_issue</code></a>,
+            then runs workspace hooks, then starts the Codex app-server session inside that directory.
+          </p>
+
+          <div class="workspace-sequence">
+            <div class="detail-card" data-node="runner" style="--accent: var(--agent)">
+              <div class="mini-kicker"><span class="dot"></span>1</div>
+              <strong>AgentRunner asks</strong>
+              <p><a class="code-link" href="../elixir/lib/symphony_elixir/workspace.ex"><code>Workspace.create_for_issue(issue, worker_host)</code></a> is the gate before Codex can start.</p>
+            </div>
+            <div class="detail-card" data-node="workspace-core" style="--accent: var(--workspace)">
+              <div class="mini-kicker"><span class="dot"></span>2</div>
+              <strong>Identifier sanitized</strong>
+              <p>The issue identifier becomes a filesystem-safe id by replacing unsafe characters with <code>_</code>.</p>
+            </div>
+            <div class="detail-card" data-node="config" style="--accent: var(--daemon)">
+              <div class="mini-kicker"><span class="dot"></span>3</div>
+              <strong>Path resolved</strong>
+              <p>Local workspaces join <code>workspace.root</code> with the safe id, then canonicalize and validate under root.</p>
+            </div>
+            <div class="detail-card" data-node="workspace-core" style="--accent: var(--workspace)">
+              <div class="mini-kicker"><span class="dot"></span>4</div>
+              <strong>Directory ensured</strong>
+              <p>Existing directories are reused. Existing non-directories are removed. Missing paths are created.</p>
+            </div>
+            <div class="detail-card" data-node="workspace-core" style="--accent: var(--workspace)">
+              <div class="mini-kicker"><span class="dot"></span>5</div>
+              <strong>Hooks prepare repo</strong>
+              <p><code>after_create</code> runs only for new directories. <code>before_run</code> runs before Codex.</p>
+            </div>
+            <div class="detail-card" data-node="app-client" style="--accent: var(--codex)">
+              <div class="mini-kicker"><span class="dot"></span>6</div>
+              <strong>Codex cwd set</strong>
+              <p>The app-server launches with the workspace as <code>cwd</code>, then thread and turn start with that path.</p>
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Case</th>
+                <th>Behavior</th>
+                <th>Why it matters</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Local workspace</td>
+                <td><a class="code-link" href="../elixir/lib/symphony_elixir/workspace.ex"><code>workspace.root / safe_issue_id</code></a> is canonicalized, validated, then created or reused.</td>
+                <td>Keeps Codex execution in deterministic per-issue directories under the configured root.</td>
+              </tr>
+              <tr>
+                <td>Remote worker</td>
+                <td>The daemon sends an SSH script that performs the same directory check and returns the real path.</td>
+                <td>Lets the same orchestration logic target a remote worker host while preserving the workspace contract.</td>
+              </tr>
+              <tr>
+                <td>Fresh workspace</td>
+                <td><a class="code-link" href="../elixir/lib/symphony_elixir/workspace.ex"><code>after_create</code></a> may clone, checkout, install deps, or otherwise prepare the repo.</td>
+                <td>Expensive setup runs once per created workspace instead of every continuation turn.</td>
+              </tr>
+              <tr>
+                <td>Every run attempt</td>
+                <td><a class="code-link" href="../elixir/lib/symphony_elixir/workspace.ex"><code>before_run</code></a> runs before Codex; <a class="code-link" href="../elixir/lib/symphony_elixir/workspace.ex"><code>after_run</code></a> runs from an <code>after</code> block.</td>
+                <td>Setup and cleanup are tied to the actual worker attempt, including failure paths.</td>
+              </tr>
+            </tbody>
+          </table>
+        </article>
+
+        <article class="panel full">
+          <h2>Boundary rules</h2>
+          <p>
+            <a class="code-link" href="../elixir/WORKFLOW.md"><code>WORKFLOW.md</code></a>,
+            issue trackers, workspaces, SSH hosts, and the spawned
+            <a class="code-link" href="../elixir/lib/symphony_elixir/codex/app_server.ex"><code>codex app-server</code></a>
+            process are outside the daemon. The daemon contains the
+            Elixir modules that read policy, schedule work, create directories, launch Codex, and
+            publish state.
+          </p>
+          <table>
+            <tbody>
+              <tr>
+                <td>Inside daemon</td>
+                <td><a class="code-link" href="../elixir/lib/symphony_elixir/workflow_store.ex"><code>WorkflowStore</code></a>, <a class="code-link" href="../elixir/lib/symphony_elixir/config.ex"><code>Config</code></a>, <a class="code-link" href="../elixir/lib/symphony_elixir/orchestrator.ex"><code>Orchestrator</code></a>, <a class="code-link" href="../elixir/lib/symphony_elixir/workspace.ex"><code>Workspace</code></a>, <a class="code-link" href="../elixir/lib/symphony_elixir/agent_runner.ex"><code>AgentRunner</code></a>, <a class="code-link" href="../elixir/lib/symphony_elixir/codex/app_server.ex"><code>Codex.AppServer</code></a> client module, tools, dashboard/API.</td>
+              </tr>
+              <tr>
+                <td>Outside daemon</td>
+                <td><a class="code-link" href="../elixir/WORKFLOW.md"><code>WORKFLOW.md</code></a>, Linear/Jira, workspace filesystem, remote worker host, spawned Codex app-server process.</td>
+              </tr>
+            </tbody>
+          </table>
+        </article>
+
+        <article class="card" style="--accent: var(--daemon)">
+          <div class="mini-kicker"><span class="dot"></span>Why Elixir</div>
+          <h3>It matches the operational shape</h3>
+          <p>Many concurrent issue workers, supervised subprocesses, retries, timers, PubSub, and LiveView fit BEAM/OTP well.</p>
+        </article>
+
+        <article class="card" style="--accent: var(--codex)">
+          <div class="mini-kicker"><span class="dot"></span>Codex role</div>
+          <h3>Execution, not scheduling</h3>
+          <p>Codex performs repo reasoning, edits, commands, tests, and tracker tool calls after Symphony creates the run context.</p>
+        </article>
+
+        <article class="card" style="--accent: var(--tools)">
+          <div class="mini-kicker"><span class="dot"></span>Portability</div>
+          <h3>The daemon can be ported</h3>
+          <p>Go, Rust, TypeScript, Python, or Kotlin can work if they preserve workspace isolation, app-server protocol, retries, and observability.</p>
+        </article>
+      </section>
+
+      <section class="long-horizon-panel" aria-label="Long horizon Codex execution">
+        <div class="mini-kicker" style="--accent: var(--codex)"><span class="dot"></span>Long-horizon agent loop</div>
+        <h2>How Codex is kept moving across long tasks</h2>
+        <p>
+          Symphony does not rely on one giant turn. It starts a Codex app-server session in the
+          workspace through
+          <a class="code-link" href="../elixir/lib/symphony_elixir/codex/app_server.ex"><code>Codex.AppServer</code></a>,
+          sends the full issue prompt from
+          <a class="code-link" href="../elixir/lib/symphony_elixir/prompt_builder.ex"><code>PromptBuilder</code></a>
+          for turn 1, then starts continuation turns through
+          <a class="code-link" href="../elixir/lib/symphony_elixir/agent_runner.ex"><code>AgentRunner</code></a>
+          on the same live thread while the tracker issue is still active.
+        </p>
+
+        <div class="drawio-canvas horizon-diagram" data-animate-flow="true" aria-label="Draw.io style long-horizon source flow">
+          <svg class="drawio-map" viewBox="0 0 1000 820" preserveAspectRatio="none" role="img" aria-label="Long-horizon source file flow diagram">
+            <defs>
+              <marker id="horizonArrow" markerWidth="13" markerHeight="13" refX="11" refY="6.5" orient="auto" markerUnits="userSpaceOnUse">
+                <path d="M1,1 L1,12 L12,6.5 z" fill="context-stroke"></path>
+              </marker>
+            </defs>
+            <path id="hzWorkflowPrompt" class="drawio-line" d="M210 178 H250" marker-end="url(#horizonArrow)" style="--line-color: var(--workspace)"></path>
+            <path id="hzPromptApp" class="drawio-line" d="M430 178 H470" marker-end="url(#horizonArrow)" style="--line-color: var(--daemon)"></path>
+            <path id="hzAppRunner" class="drawio-line" d="M650 178 H690" marker-end="url(#horizonArrow)" style="--line-color: var(--codex)"></path>
+            <path id="hzRunnerScheduler" class="drawio-line" d="M825 306 V426" marker-end="url(#horizonArrow)" style="--line-color: var(--agent)"></path>
+            <path id="hzRedispatch" class="drawio-line" d="M690 540 H520 V330 H825 V306" marker-end="url(#horizonArrow)" style="--line-color: var(--danger)"></path>
+            <path id="hzSameSession" class="drawio-line" d="M960 160 H985 V260 H960" marker-end="url(#horizonArrow)" style="--line-color: var(--agent)"></path>
+          </svg>
+
+          <div class="flow-note hz-note-turns">same app-server session</div>
+          <div class="flow-note hz-note-retry">active issue re-dispatch</div>
+
+          <article class="drawio-node hz-workflow" style="--accent: var(--workspace)">
+            <div class="mini-kicker"><span class="dot"></span>Policy file</div>
+            <h3><a href="../elixir/WORKFLOW.md">WORKFLOW.md</a></h3>
+            <small>Human-authored prompt and runtime contract.</small>
+            <div class="excerpt-list">
+              <code class="excerpt"><span class="hl">max_turns: 20</span></code>
+              <code class="excerpt">Resume from the <span class="hl">current workspace state</span>.</code>
+              <code class="excerpt">Do not end while issue remains <span class="hl">active</span>.</code>
+              <code class="excerpt">Use exactly one persistent <span class="hl">## Codex Workpad</span>.</code>
+            </div>
+            <div class="contribution">Contributes the horizon budget, durable memory, stop rules, and completion bar.</div>
+          </article>
+
+          <article class="drawio-node hz-prompt" style="--accent: var(--daemon)">
+            <div class="mini-kicker"><span class="dot"></span>Prompt builder</div>
+            <h3><a href="../elixir/lib/symphony_elixir/prompt_builder.ex">prompt_builder.ex</a></h3>
+            <small>Converts workflow policy plus issue data into the turn-1 prompt.</small>
+            <div class="excerpt-list">
+              <code class="excerpt"><span class="hl">Workflow.current()</span> |> prompt_template!</code>
+              <code class="excerpt">Solid.render!(%{ <span class="hl">"issue"</span> =&gt; issue })</code>
+              <code class="excerpt">@render_opts <span class="hl">strict_variables</span></code>
+            </div>
+            <div class="contribution">Makes the prompt deterministic: every run starts from current tracker context.</div>
+          </article>
+
+          <article class="drawio-node hz-app" style="--accent: var(--codex)">
+            <div class="mini-kicker"><span class="dot"></span>Codex protocol</div>
+            <h3><a href="../elixir/lib/symphony_elixir/codex/app_server.ex">app_server.ex</a></h3>
+            <small>Starts the Codex thread and each turn with workspace context.</small>
+            <div class="excerpt-list">
+              <code class="excerpt">"method" =&gt; <span class="hl">"thread/start"</span></code>
+              <code class="excerpt">"cwd" =&gt; <span class="hl">workspace</span></code>
+              <code class="excerpt">"threadId" =&gt; <span class="hl">thread_id</span></code>
+              <code class="excerpt">"text" =&gt; <span class="hl">prompt</span></code>
+            </div>
+            <div class="contribution">Keeps every turn tied to the same thread identity and filesystem context.</div>
+          </article>
+
+          <article class="drawio-node hz-runner" style="--accent: var(--agent)">
+            <div class="mini-kicker"><span class="dot"></span>Turn loop</div>
+            <h3><a href="../elixir/lib/symphony_elixir/agent_runner.ex">agent_runner.ex</a></h3>
+            <small>Runs multiple Codex turns inside one app-server session.</small>
+            <div class="excerpt-list">
+              <code class="excerpt">max_turns = Config.settings!().agent.<span class="hl">max_turns</span></code>
+              <code class="excerpt"><span class="hl">turn_number &lt; max_turns</span> -> continue</code>
+              <code class="excerpt"><span class="hl">turn_number + 1</span></code>
+              <code class="excerpt">Continuation guidance: <span class="hl">do not end</span></code>
+            </div>
+            <div class="contribution">Creates the bounded loop: continue while the issue is active, stop at the cap.</div>
+          </article>
+
+          <article class="drawio-node hz-orchestrator" style="--accent: var(--danger)">
+            <div class="mini-kicker"><span class="dot"></span>Scheduler recovery</div>
+            <h3><a href="../elixir/lib/symphony_elixir/orchestrator.ex">orchestrator.ex</a></h3>
+            <small>Re-checks active work after a worker exits.</small>
+            <div class="excerpt-list">
+              <code class="excerpt">Agent task completed; scheduling <span class="hl">active-state continuation check</span></code>
+              <code class="excerpt">schedule_issue_retry(... <span class="hl">delay_type: :continuation</span>)</code>
+              <code class="excerpt">agent exited; scheduling <span class="hl">retry</span></code>
+            </div>
+            <div class="contribution">Prevents a normal worker exit from being mistaken for permanent completion.</div>
+          </article>
+        </div>
+
+        <div class="diagram-walkthrough" id="horizonWalkthrough" aria-label="Long horizon diagram walkthrough">
+          <div class="walkthrough-controls">
+            <div class="walkthrough-buttons">
+              <button type="button" data-action="prev">Back</button>
+              <button type="button" data-action="play" class="primary">Play</button>
+              <button type="button" data-action="next">Next</button>
+            </div>
+            <div class="walkthrough-status" aria-live="polite">
+              <strong data-role="title">Ready</strong>
+              <p data-role="copy">Press Play to walk through the long-horizon loop.</p>
+            </div>
+          </div>
+          <ol class="walkthrough-steps" data-role="steps"></ol>
+        </div>
+      </section>
+
+      <section class="appserver-turns-panel" aria-label="Codex app-server multi-turn orchestration">
+        <div class="mini-kicker" style="--accent: var(--codex)"><span class="dot"></span>App-server multi-turn lifecycle</div>
+        <h2>How one app-server session orchestrates multiple turns</h2>
+        <p>
+          <a class="code-link" href="../elixir/lib/symphony_elixir/agent_runner.ex"><code>AgentRunner</code></a>
+          opens one app-server session for the workspace, then calls
+          <a class="code-link" href="../elixir/lib/symphony_elixir/codex/app_server.ex"><code>AppServer.run_turn</code></a>
+          repeatedly against the same <code>thread_id</code> until
+          the tracker issue is no longer active or <code>agent.max_turns</code> is reached.
+        </p>
+
+        <div class="drawio-canvas appserver-diagram" data-animate-flow="true" aria-label="Draw.io style app-server multi-turn flow">
+          <div class="drawio-boundary as-boundary-daemon" data-label="Symphony daemon / AppServer client"></div>
+          <div class="drawio-boundary as-boundary-appserver" data-label="codex app-server runtime"></div>
+          <div class="drawio-boundary as-boundary-codex" data-label="Codex turn runtime"></div>
+
+          <svg class="drawio-map" viewBox="0 0 1000 780" preserveAspectRatio="none" role="img" aria-label="App-server multi-turn flow diagram">
+            <defs>
+              <marker id="appTurnArrow" markerWidth="13" markerHeight="13" refX="11" refY="6.5" orient="auto" markerUnits="userSpaceOnUse">
+                <path d="M1,1 L1,12 L12,6.5 z" fill="context-stroke"></path>
+              </marker>
+            </defs>
+            <path id="asRunnerStart" class="drawio-line" d="M210 350 H230 V175 H250" marker-end="url(#appTurnArrow)" style="--line-color: var(--agent)"></path>
+            <path id="asStartProcess" class="drawio-line" d="M430 175 H470" marker-end="url(#appTurnArrow)" style="--line-color: var(--codex)"></path>
+            <path id="asProcessThread" class="drawio-line" d="M650 175 H700" marker-end="url(#appTurnArrow)" style="--line-color: var(--codex)"></path>
+            <path id="asThreadTurn" class="drawio-line" d="M830 289 V325 H560 V343" marker-end="url(#appTurnArrow)" style="--line-color: var(--dashboard)"></path>
+            <path id="asTurnStream" class="drawio-line" d="M650 445 H700" marker-end="url(#appTurnArrow)" style="--line-color: var(--codex)"></path>
+            <path id="asStreamTools" class="drawio-line" d="M830 569 V601" marker-end="url(#appTurnArrow)" style="--line-color: var(--tools)"></path>
+            <path id="asToolsStream" class="drawio-line" d="M700 660 H675 V485 H700" marker-end="url(#appTurnArrow)" style="--line-color: var(--tools)"></path>
+            <path id="asStreamDecision" class="drawio-line" d="M700 505 H650 V640 H430" marker-end="url(#appTurnArrow)" style="--line-color: var(--daemon)"></path>
+            <path id="asDecisionTurn" class="drawio-line" d="M340 562 V475 H470" marker-end="url(#appTurnArrow)" style="--line-color: var(--agent)"></path>
+            <path id="asDecisionStop" class="drawio-line" d="M250 635 H210" marker-end="url(#appTurnArrow)" style="--line-color: var(--danger)"></path>
+          </svg>
+
+          <div class="flow-note as-note-session">same port + thread_id</div>
+          <div class="flow-note as-note-loop">continue when active</div>
+
+          <article class="drawio-node as-runner" style="--accent: var(--agent)">
+            <div class="mini-kicker"><span class="dot"></span>AgentRunner</div>
+            <h3><a href="../elixir/lib/symphony_elixir/agent_runner.ex">Owns the loop</a></h3>
+            <small>Creates one app-server session, then recurses through turns.</small>
+            <div class="excerpt-list">
+              <code class="excerpt"><span class="hl">start_session</span>(workspace)</code>
+              <code class="excerpt">turn <span class="hl">1..max_turns</span></code>
+            </div>
+          </article>
+
+          <article class="drawio-node as-start" style="--accent: var(--codex)">
+            <div class="mini-kicker"><span class="dot"></span>Start session</div>
+            <h3><a href="../elixir/lib/symphony_elixir/codex/app_server.ex">Validate cwd + policies</a></h3>
+            <small>The session remembers workspace, approval policy, sandbox policy, port, and worker host.</small>
+            <div class="excerpt-list">
+              <code class="excerpt"><span class="hl">validate_workspace_cwd</span></code>
+              <code class="excerpt"><span class="hl">session_policies</span></code>
+            </div>
+          </article>
+
+          <article class="drawio-node as-process" style="--accent: var(--codex)">
+            <div class="mini-kicker"><span class="dot"></span>Process</div>
+            <h3><a href="../elixir/lib/symphony_elixir/codex/app_server.ex">Spawn app-server</a></h3>
+            <small>Local uses an Erlang port; remote uses SSH to start the same command.</small>
+            <div class="excerpt-list">
+              <code class="excerpt"><span class="hl">Port.open</span>(codex app-server)</code>
+              <code class="excerpt">cd: <span class="hl">workspace</span></code>
+            </div>
+          </article>
+
+          <article class="drawio-node as-thread" style="--accent: var(--dashboard)">
+            <div class="mini-kicker"><span class="dot"></span>Thread setup</div>
+            <h3><a href="../elixir/lib/symphony_elixir/codex/app_server.ex">Initialize + thread/start</a></h3>
+            <small>The daemon initializes JSON-RPC and creates one Codex thread for the workspace.</small>
+            <div class="excerpt-list">
+              <code class="excerpt"><span class="hl">initialize</span></code>
+              <code class="excerpt"><span class="hl">thread/start</span></code>
+              <code class="excerpt"><span class="hl">dynamicTools</span></code>
+            </div>
+          </article>
+
+          <article class="drawio-node as-turn" style="--accent: var(--codex)">
+            <div class="mini-kicker"><span class="dot"></span>Turn N</div>
+            <h3><a href="../elixir/lib/symphony_elixir/codex/app_server.ex">turn/start</a></h3>
+            <small>Each turn uses the same thread and workspace, with a new prompt.</small>
+            <div class="excerpt-list">
+              <code class="excerpt">threadId = <span class="hl">thread_id</span></code>
+              <code class="excerpt">text = <span class="hl">prompt</span></code>
+              <code class="excerpt">cwd = <span class="hl">workspace</span></code>
+            </div>
+          </article>
+
+          <article class="drawio-node as-stream" style="--accent: var(--dashboard)">
+            <div class="mini-kicker"><span class="dot"></span>Stream</div>
+            <h3><a href="../elixir/lib/symphony_elixir/codex/app_server.ex">Receive events</a></h3>
+            <small>The daemon reads JSON-RPC lines until the turn completes, fails, cancels, or times out.</small>
+            <div class="excerpt-list">
+              <code class="excerpt"><span class="hl">receive_loop</span>(port)</code>
+              <code class="excerpt"><span class="hl">turn/completed</span></code>
+              <code class="excerpt"><span class="hl">turn/failed</span></code>
+            </div>
+          </article>
+
+          <article class="drawio-node as-tools" style="--accent: var(--tools)">
+            <div class="mini-kicker"><span class="dot"></span>Tool bridge</div>
+            <h3><a href="../elixir/lib/symphony_elixir/codex/app_server.ex">Tools + approvals</a></h3>
+            <small>Dynamic tool calls and approval requests are handled during the stream, then the loop resumes.</small>
+            <div class="excerpt-list">
+              <code class="excerpt"><span class="hl">item/tool/call</span></code>
+              <code class="excerpt"><span class="hl">approval request</span></code>
+            </div>
+          </article>
+
+          <article class="drawio-node as-decision" style="--accent: var(--agent)">
+            <div class="mini-kicker"><span class="dot"></span>Decision</div>
+            <h3><a href="../elixir/lib/symphony_elixir/agent_runner.ex">Continue?</a></h3>
+            <small>After a normal turn, AgentRunner re-fetches tracker state.</small>
+            <div class="excerpt-list">
+              <code class="excerpt"><span class="hl">continue_with_issue?</span>(issue)</code>
+              <code class="excerpt">turn_number + 1</code>
+            </div>
+          </article>
+
+          <article class="drawio-node as-stop" style="--accent: var(--danger)">
+            <div class="mini-kicker"><span class="dot"></span>Stop</div>
+            <h3><a href="../elixir/lib/symphony_elixir/codex/app_server.ex">Close session</a></h3>
+            <small>When done, blocked, failed, or capped, the daemon closes the port.</small>
+            <div class="excerpt-list">
+              <code class="excerpt"><span class="hl">stop_session</span>(session)</code>
+            </div>
+          </article>
+        </div>
+
+        <div class="diagram-walkthrough" id="appserverWalkthrough" aria-label="App-server lifecycle diagram walkthrough">
+          <div class="walkthrough-controls">
+            <div class="walkthrough-buttons">
+              <button type="button" data-action="prev">Back</button>
+              <button type="button" data-action="play" class="primary">Play</button>
+              <button type="button" data-action="next">Next</button>
+            </div>
+            <div class="walkthrough-status" aria-live="polite">
+              <strong data-role="title">Ready</strong>
+              <p data-role="copy">Press Play to walk through the app-server turn lifecycle.</p>
+            </div>
+          </div>
+          <ol class="walkthrough-steps" data-role="steps"></ol>
+        </div>
+      </section>
+
+      <section class="source-panel" aria-label="Sources">
+        <h2>Sources</h2>
+        <ol>
+          <li>
+            <a href="https://openai.com/index/open-source-codex-orchestration-symphony/" target="_blank" rel="noreferrer">OpenAI Symphony announcement</a>
+            - describes Symphony as an issue-tracker control plane where active tasks map to agent workspaces.
+          </li>
+          <li>
+            <a href="../SPEC.md">Local SPEC.md</a>
+            - language-agnostic service contract and component list.
+          </li>
+          <li>
+            <a href="../elixir/lib/symphony_elixir/workspace.ex">Workspace module</a>
+            - exact workspace path, creation, validation, SSH, and hook behavior.
+          </li>
+          <li>
+            <a href="../elixir/lib/symphony_elixir/tracker.ex">Tracker interface</a>
+            - issue-state contract that the daemon polls and re-checks between turns.
+          </li>
+          <li>
+            <a href="../elixir/lib/symphony_elixir/agent_runner.ex">AgentRunner module</a>
+            - calls workspace creation, starts Codex sessions, and loops continuation turns.
+          </li>
+          <li>
+            <a href="../elixir/lib/symphony_elixir/orchestrator.ex">Orchestrator module</a>
+            - schedules continuation checks and retries after worker completion or failure.
+          </li>
+          <li>
+            <a href="../elixir/lib/symphony_elixir/prompt_builder.ex">PromptBuilder module</a>
+            - renders the workflow prompt template with strict variables and issue context.
+          </li>
+          <li>
+            <a href="../elixir/WORKFLOW.md">Local WORKFLOW.md</a>
+            - long-horizon prompt body, status routing, workpad contract, validation bar, and <code>agent.max_turns</code>.
+          </li>
+          <li>
+            <a href="../elixir/lib/symphony_elixir/codex/app_server.ex">Codex.AppServer module</a>
+            - spawned process, JSON-RPC session startup, cwd, dynamic tools, and turn lifecycle.
+          </li>
+          <li>
+            <a href="../elixir/lib/symphony_elixir/codex/dynamic_tool.ex">DynamicTool module</a>
+            and <a href="../elixir/lib/symphony_elixir/status_dashboard.ex">StatusDashboard module</a>
+            - tracker tool execution and presentation-facing runtime visibility.
+          </li>
+        </ol>
+      </section>
+    </main>
+
+    <script>
+      function rewriteLocalLinksForVSCode() {
+        if (window.location.protocol !== "file:") return;
+
+        document.querySelectorAll('a[href^="../"]').forEach((link) => {
+          const originalHref = link.getAttribute("href");
+          const filePath = decodeURIComponent(new URL(originalHref, window.location.href).pathname);
+          const lineSuffix = link.dataset.line ? `:${link.dataset.line}` : "";
+          link.dataset.fileHref = originalHref;
+          link.href = `vscode://file${encodeURI(filePath)}${lineSuffix}`;
+          link.title = `Open in VS Code: ${filePath}${lineSuffix}`;
+          link.classList.add("vscode-link");
+        });
+      }
+
+      function startDrawioAnimations() {
+        const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        if (reduced) return;
+
+        document.querySelectorAll('.drawio-canvas[data-animate-flow="true"]').forEach((canvas, canvasIndex) => {
+          const svg = canvas.querySelector(".drawio-map");
+          const paths = Array.from(svg.querySelectorAll("path.drawio-line"));
+          if (!paths.length) return;
+
+          const packet = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+          packet.setAttribute("r", "7");
+          packet.setAttribute("fill", "currentColor");
+          packet.setAttribute("aria-hidden", "true");
+          packet.classList.add("drawio-packet");
+          svg.appendChild(packet);
+
+          const duration = 1350;
+          const pause = 280;
+          const cycle = duration + pause;
+          const delay = canvasIndex * 420;
+          const startedAt = performance.now() + delay;
+
+          function tick(now) {
+            const elapsed = Math.max(0, now - startedAt);
+            const pathIndex = Math.floor(elapsed / cycle) % paths.length;
+            const phase = elapsed % cycle;
+            const path = paths[pathIndex];
+            const isMoving = phase < duration;
+
+            paths.forEach((candidate, index) => {
+              candidate.classList.toggle("flowing", index === pathIndex && isMoving);
+            });
+
+            if (isMoving) {
+              const length = path.getTotalLength();
+              const progress = phase / duration;
+              const eased = 1 - Math.pow(1 - progress, 3);
+              const point = path.getPointAtLength(length * eased);
+              packet.style.color = getComputedStyle(path).stroke;
+              packet.setAttribute("cx", point.x);
+              packet.setAttribute("cy", point.y);
+              packet.classList.add("visible");
+            } else {
+              packet.classList.remove("visible");
+            }
+
+            requestAnimationFrame(tick);
+          }
+
+          requestAnimationFrame(tick);
+        });
+      }
+
+      const diagramWalkthroughs = [
+        {
+          root: "#workspaceWalkthrough",
+          canvas: ".workspace-diagram",
+          steps: [
+            {
+              title: "AgentRunner asks for a workspace",
+              copy: "Before Codex starts, AgentRunner calls Workspace.create_for_issue with the issue and optional worker host.",
+              path: "wrRequest",
+              color: "#f58ab6",
+              nodes: [".wr-agent", ".wr-create"],
+            },
+            {
+              title: "Workspace resolves a safe path",
+              copy: "The issue identifier is sanitized, joined with workspace.root, then handed to the local-or-remote branch.",
+              path: "wrResolve",
+              color: "#9dd66d",
+              nodes: [".wr-create", ".wr-decision"],
+            },
+            {
+              title: "Local worker uses filesystem calls",
+              copy: "On the daemon host, the path is canonicalized, validated under root, then created or reused.",
+              path: "wrLocalBranch",
+              color: "#9dd66d",
+              nodes: [".wr-decision", ".wr-local"],
+            },
+            {
+              title: "Remote worker uses SSH",
+              copy: "When worker_host is set, the daemon sends a small shell script that ensures the directory and returns its real path.",
+              path: "wrRemoteBranch",
+              color: "#8fd0ff",
+              nodes: [".wr-decision", ".wr-remote"],
+            },
+            {
+              title: "Fresh local workspace runs hooks",
+              copy: "after_create runs only when the directory is new; before_run prepares every worker attempt before Codex.",
+              path: "wrLocalHooks",
+              color: "#f0b35a",
+              nodes: [".wr-local", ".wr-hooks"],
+            },
+            {
+              title: "Remote workspace runs same hook contract",
+              copy: "Remote setup follows the same lifecycle contract, preserving one orchestration model across worker environments.",
+              path: "wrRemoteHooks",
+              color: "#8fd0ff",
+              nodes: [".wr-remote", ".wr-hooks"],
+            },
+            {
+              title: "Codex starts inside that directory",
+              copy: "The app-server session starts with cwd set to the prepared workspace, so edits and commands stay isolated.",
+              path: "wrStartCodex",
+              color: "#d282d9",
+              nodes: [".wr-hooks", ".wr-codex"],
+            },
+          ],
+        },
+        {
+          root: "#horizonWalkthrough",
+          canvas: ".horizon-diagram",
+          steps: [
+            {
+              title: "Policy file supplies the contract",
+              copy: "WORKFLOW.md provides max_turns, workspace-resume rules, workpad discipline, and stop conditions.",
+              path: "hzWorkflowPrompt",
+              color: "#9dd66d",
+              nodes: [".hz-workflow", ".hz-prompt"],
+            },
+            {
+              title: "PromptBuilder renders turn 1",
+              copy: "PromptBuilder combines workflow policy and current issue data with strict template rendering.",
+              path: "hzPromptApp",
+              color: "#f0b35a",
+              nodes: [".hz-prompt", ".hz-app"],
+            },
+            {
+              title: "AppServer binds thread and cwd",
+              copy: "The Codex protocol starts a thread and turns with the same workspace context.",
+              path: "hzAppRunner",
+              color: "#d282d9",
+              nodes: [".hz-app", ".hz-runner"],
+            },
+            {
+              title: "AgentRunner loops within the cap",
+              copy: "The same app-server session keeps receiving continuation turns while the issue is active and max_turns is not reached.",
+              path: "hzSameSession",
+              color: "#f58ab6",
+              nodes: [".hz-runner"],
+            },
+            {
+              title: "Scheduler checks after worker exit",
+              copy: "When the worker exits, the orchestrator checks whether active work needs another dispatch.",
+              path: "hzRunnerScheduler",
+              color: "#ff7d7d",
+              nodes: [".hz-runner", ".hz-orchestrator"],
+            },
+            {
+              title: "Active issues are re-dispatched",
+              copy: "If the tracker issue still needs work, Symphony schedules a continuation rather than treating the exit as final.",
+              path: "hzRedispatch",
+              color: "#ff7d7d",
+              nodes: [".hz-orchestrator", ".hz-runner", ".hz-app"],
+            },
+          ],
+        },
+        {
+          root: "#appserverWalkthrough",
+          canvas: ".appserver-diagram",
+          steps: [
+            {
+              title: "AgentRunner owns the loop",
+              copy: "The daemon-side runner starts one app-server session, then drives the turn sequence.",
+              path: "asRunnerStart",
+              color: "#f58ab6",
+              nodes: [".as-boundary-daemon", ".as-runner", ".as-start"],
+            },
+            {
+              title: "Session validates cwd and policies",
+              copy: "The AppServer client validates the workspace and resolves approval and sandbox policies before launch.",
+              path: "asStartProcess",
+              color: "#d282d9",
+              nodes: [".as-boundary-daemon", ".as-boundary-appserver", ".as-start", ".as-process"],
+            },
+            {
+              title: "The app-server process starts",
+              copy: "Local runs through an Erlang port; remote starts the same command over SSH, with cwd set to the workspace.",
+              path: "asProcessThread",
+              color: "#d282d9",
+              nodes: [".as-boundary-appserver", ".as-process", ".as-thread"],
+            },
+            {
+              title: "One Codex thread is initialized",
+              copy: "initialize and thread/start establish the JSON-RPC session and register dynamic tool specs.",
+              path: "asThreadTurn",
+              color: "#7da8ff",
+              nodes: [".as-boundary-appserver", ".as-boundary-codex", ".as-thread", ".as-turn"],
+            },
+            {
+              title: "Turn N starts in the same workspace",
+              copy: "Each turn sends the same thread_id and workspace cwd, but uses a new prompt.",
+              path: "asTurnStream",
+              color: "#d282d9",
+              nodes: [".as-boundary-codex", ".as-turn", ".as-stream"],
+            },
+            {
+              title: "Stream handles tools and approvals",
+              copy: "During receive_loop, tool calls and approval requests are bridged back into daemon-managed policy.",
+              path: "asStreamTools",
+              color: "#8fd0ff",
+              nodes: [".as-boundary-codex", ".as-stream", ".as-tools"],
+            },
+            {
+              title: "Tool responses return to the stream",
+              copy: "After the daemon handles a tool call or approval, the app-server stream continues the same Codex turn.",
+              path: "asToolsStream",
+              color: "#8fd0ff",
+              nodes: [".as-boundary-codex", ".as-tools", ".as-stream"],
+            },
+            {
+              title: "Completed turn returns to AgentRunner",
+              copy: "When the stream reports completion or failure, control returns to the daemon-side decision point.",
+              path: "asStreamDecision",
+              color: "#f0b35a",
+              nodes: [".as-boundary-daemon", ".as-boundary-codex", ".as-stream", ".as-decision"],
+            },
+            {
+              title: "Active issue continues",
+              copy: "If the issue is still active and under the max_turns cap, AgentRunner starts the next turn on the same session.",
+              path: "asDecisionTurn",
+              color: "#f58ab6",
+              nodes: [".as-boundary-daemon", ".as-boundary-codex", ".as-decision", ".as-turn"],
+            },
+            {
+              title: "Done, failed, blocked, or capped stops",
+              copy: "When continuation is no longer allowed, the daemon closes the app-server session and port.",
+              path: "asDecisionStop",
+              color: "#ff7d7d",
+              nodes: [".as-boundary-daemon", ".as-decision", ".as-stop"],
+            },
+          ],
+        },
+      ];
+
+      function setupDiagramWalkthroughs() {
+        diagramWalkthroughs.forEach((config) => {
+          const panel = document.querySelector(config.root);
+          const canvas = document.querySelector(config.canvas);
+          if (!panel || !canvas) return;
+
+          const svg = canvas.querySelector(".drawio-map");
+          const packet = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+          packet.setAttribute("r", "7");
+          packet.setAttribute("fill", "currentColor");
+          packet.setAttribute("aria-hidden", "true");
+          packet.classList.add("drawio-packet");
+          svg.appendChild(packet);
+
+          const titleEl = panel.querySelector('[data-role="title"]');
+          const copyEl = panel.querySelector('[data-role="copy"]');
+          const listEl = panel.querySelector('[data-role="steps"]');
+          const playButton = panel.querySelector('[data-action="play"]');
+          let current = -1;
+          let playingDiagram = false;
+          let frame = null;
+          let timer = null;
+
+          config.steps.forEach((step, index) => {
+            const item = document.createElement("li");
+            item.style.setProperty("--step-color", step.color);
+            item.innerHTML = `
+              <span class="step-number">${index + 1}</span>
+              <span>
+                <span class="step-title">${step.title}</span>
+                <span class="step-copy">${step.copy}</span>
+              </span>
+            `;
+            item.addEventListener("click", () => {
+              playingDiagram = false;
+              updateButton();
+              run(index);
+            });
+            listEl.appendChild(item);
+          });
+
+          function updateButton() {
+            playButton.textContent = playingDiagram ? "Pause" : "Play";
+          }
+
+          function setStep(index) {
+            current = (index + config.steps.length) % config.steps.length;
+            const step = config.steps[current];
+            panel.style.setProperty("--walk-color", step.color);
+            titleEl.textContent = `${current + 1}. ${step.title}`;
+            copyEl.textContent = step.copy;
+
+            listEl.querySelectorAll("li").forEach((item, itemIndex) => {
+              item.classList.toggle("active", itemIndex === current);
+            });
+
+            canvas.querySelectorAll(".drawio-node, .drawio-boundary").forEach((item) => {
+              item.classList.remove("walk-active");
+            });
+            canvas.querySelectorAll(".drawio-line").forEach((line) => {
+              line.classList.remove("walk-active", "flowing");
+            });
+
+            step.nodes.forEach((selector) => {
+              canvas.querySelectorAll(selector).forEach((item) => item.classList.add("walk-active"));
+            });
+
+            const path = document.getElementById(step.path);
+            if (path) {
+              path.classList.add("walk-active");
+            }
+          }
+
+          function clearTimers() {
+            if (frame) {
+              cancelAnimationFrame(frame);
+              frame = null;
+            }
+            if (timer) {
+              clearTimeout(timer);
+              timer = null;
+            }
+          }
+
+          function run(index) {
+            clearTimers();
+            setStep(index);
+            animate(config.steps[current]);
+          }
+
+          function animate(step) {
+            const path = document.getElementById(step.path);
+            const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+            if (!path || reduced) {
+              packet.classList.remove("visible");
+              if (playingDiagram) timer = window.setTimeout(() => run(current + 1), 260);
+              return;
+            }
+
+            const length = path.getTotalLength();
+            const duration = 1250;
+            const started = performance.now();
+            path.classList.add("flowing");
+            packet.style.color = step.color;
+            packet.classList.add("visible");
+
+            function tick(now) {
+              const progress = Math.min((now - started) / duration, 1);
+              const eased = 1 - Math.pow(1 - progress, 3);
+              const point = path.getPointAtLength(length * eased);
+              packet.setAttribute("cx", point.x);
+              packet.setAttribute("cy", point.y);
+
+              if (progress < 1) {
+                frame = requestAnimationFrame(tick);
+              } else {
+                path.classList.remove("flowing");
+                packet.classList.remove("visible");
+                frame = null;
+                if (playingDiagram) timer = window.setTimeout(() => run(current + 1), 520);
+              }
+            }
+
+            frame = requestAnimationFrame(tick);
+          }
+
+          panel.querySelector('[data-action="prev"]').addEventListener("click", () => {
+            playingDiagram = false;
+            updateButton();
+            run(current - 1);
+          });
+
+          panel.querySelector('[data-action="next"]').addEventListener("click", () => {
+            playingDiagram = false;
+            updateButton();
+            run(current + 1);
+          });
+
+          playButton.addEventListener("click", () => {
+            playingDiagram = !playingDiagram;
+            updateButton();
+            if (playingDiagram && !frame) run(current + 1);
+          });
+
+          run(0);
+        });
+      }
+
+      const steps = [
+        {
+          title: "Poll candidate work",
+          copy: "The daemon polls Linear or Jira for active issues that match workflow policy.",
+          path: "ticketToDaemon",
+          color: "#62d5c8",
+          nodes: ["tracker", "daemon", "workflow", "config", "orchestrator"],
+        },
+        {
+          title: "Claim and revalidate",
+          copy: "The daemon reserves the issue, refreshes tracker state, and avoids duplicate dispatch.",
+          path: "daemonToTracker",
+          color: "#f0b35a",
+          nodes: ["daemon", "tracker", "orchestrator"],
+        },
+        {
+          title: "Create workspace",
+          copy: "AgentRunner asks Workspace to sanitize the issue id, resolve workspace.root, validate the path, create or reuse the directory, and run after_create when new.",
+          path: "daemonToWorkspace",
+          color: "#9dd66d",
+          nodes: ["daemon", "workspace", "runner", "workspace-core", "config"],
+        },
+        {
+          title: "Launch app-server",
+          copy: "The in-daemon Codex.AppServer client launches an external codex app-server process for the prepared workspace.",
+          path: "daemonToAppserver",
+          color: "#d282d9",
+          nodes: ["daemon", "appserver", "runner", "app-client"],
+        },
+        {
+          title: "Bind cwd to workspace",
+          copy: "The app-server starts with the workspace as cwd, so repository files and setup output are the execution context.",
+          path: "workspaceToAppserver",
+          color: "#9dd66d",
+          nodes: ["workspace", "appserver", "app-client"],
+        },
+        {
+          title: "Start Codex turn",
+          copy: "The app-server starts a Codex thread and turn with approval, sandbox, cwd, and dynamic tool settings.",
+          path: "appserverToAgent",
+          color: "#d282d9",
+          nodes: ["appserver", "agent", "app-client", "tools"],
+        },
+        {
+          title: "Edit and validate",
+          copy: "Codex modifies files, runs commands, and validates behavior inside the per-issue workspace.",
+          path: "agentToWorkspace",
+          color: "#f58ab6",
+          nodes: ["agent", "workspace"],
+        },
+        {
+          title: "Write tracker updates",
+          copy: "Tracker tool calls flow back through Symphony dynamic tools, using daemon-managed auth and policy.",
+          path: "agentToTracker",
+          color: "#62d5c8",
+          nodes: ["agent", "daemon", "tracker", "tools"],
+        },
+        {
+          title: "Stream events back",
+          copy: "Turn events, approval requests, blockers, failures, and token usage stream from app-server back to the daemon.",
+          path: "appserverToDaemon",
+          color: "#d282d9",
+          nodes: ["appserver", "daemon", "runner", "app-client"],
+        },
+        {
+          title: "Publish observability",
+          copy: "The daemon publishes runtime state to the dashboard/API: active sessions, workspace paths, retries, blocks, and totals.",
+          path: "daemonToDashboard",
+          color: "#7da8ff",
+          nodes: ["daemon", "dashboard", "dashboard-api"],
+        },
+        {
+          title: "Continue, retry, or block",
+          copy: "If the issue remains active, Symphony continues the Codex thread, retries with backoff, or marks the run blocked.",
+          path: "retryToAppserver",
+          color: "#ff7d7d",
+          nodes: ["daemon", "appserver", "orchestrator", "runner"],
+        },
+      ];
+
+      const packet = document.querySelector("#packet");
+      const stepList = document.querySelector("#steps");
+      const statusTitle = document.querySelector("#statusTitle");
+      const statusCopy = document.querySelector("#statusCopy");
+      const playBtn = document.querySelector("#playBtn");
+      const nextBtn = document.querySelector("#nextBtn");
+      const prevBtn = document.querySelector("#prevBtn");
+      let currentStep = -1;
+      let playing = false;
+      let animationFrame = null;
+      let playTimer = null;
+
+      function createStepList() {
+        steps.forEach((step, index) => {
+          const item = document.createElement("li");
+          item.style.setProperty("--step-color", step.color);
+          item.innerHTML = `
+            <span class="step-number">${index + 1}</span>
+            <span>
+              <span class="step-title">${step.title}</span>
+              <span class="step-copy">${step.copy}</span>
+            </span>
+          `;
+          item.addEventListener("click", () => {
+            playing = false;
+            updatePlayButton();
+            runStep(index);
+          });
+          stepList.appendChild(item);
+        });
+      }
+
+      function setActiveStep(index) {
+        currentStep = index;
+        const step = steps[index];
+        statusTitle.textContent = `${index + 1}. ${step.title}`;
+        statusCopy.textContent = step.copy;
+
+        document.querySelectorAll(".steps li").forEach((item, itemIndex) => {
+          item.classList.toggle("active", itemIndex === index);
+        });
+
+        document.querySelectorAll(".node, .zone, .module-chip, .detail-card").forEach((item) => {
+          const nodeNames = (item.dataset.node || "").split(" ");
+          item.classList.toggle("active", step.nodes.some((name) => nodeNames.includes(name)));
+        });
+
+        document.querySelectorAll(".flow-line").forEach((line) => {
+          line.classList.toggle("active", line.id === step.path);
+          line.style.setProperty("--active-color", step.color);
+        });
+
+        const activeItem = stepList.children[index];
+        if (activeItem) {
+          activeItem.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        }
+      }
+
+      function runStep(index) {
+        if (animationFrame) {
+          cancelAnimationFrame(animationFrame);
+          animationFrame = null;
+        }
+
+        if (playTimer) {
+          clearTimeout(playTimer);
+          playTimer = null;
+        }
+
+        const safeIndex = (index + steps.length) % steps.length;
+        setActiveStep(safeIndex);
+        animatePath(steps[safeIndex]);
+      }
+
+      function animatePath(step) {
+        const path = document.querySelector(`#${step.path}`);
+        const length = path.getTotalLength();
+        const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        const duration = reduced ? 1 : 1250;
+        const started = performance.now();
+
+        packet.classList.add("visible");
+        packet.style.color = step.color;
+
+        function tick(now) {
+          const progress = Math.min((now - started) / duration, 1);
+          const eased = 1 - Math.pow(1 - progress, 3);
+          const point = path.getPointAtLength(length * eased);
+          packet.setAttribute("cx", point.x);
+          packet.setAttribute("cy", point.y);
+
+          if (progress < 1) {
+            animationFrame = requestAnimationFrame(tick);
+          } else {
+            packet.classList.remove("visible");
+            animationFrame = null;
+            if (playing) {
+              playTimer = window.setTimeout(() => runStep(currentStep + 1), reduced ? 1 : 480);
+            }
+          }
+        }
+
+        animationFrame = requestAnimationFrame(tick);
+      }
+
+      function updatePlayButton() {
+        playBtn.textContent = playing ? "Pause" : "Play";
+      }
+
+      playBtn.addEventListener("click", () => {
+        playing = !playing;
+        updatePlayButton();
+        if (playing && animationFrame === null) {
+          runStep(currentStep + 1);
+        }
+      });
+
+      nextBtn.addEventListener("click", () => {
+        playing = false;
+        updatePlayButton();
+        runStep(currentStep + 1);
+      });
+
+      prevBtn.addEventListener("click", () => {
+        playing = false;
+        updatePlayButton();
+        runStep(currentStep - 1);
+      });
+
+      rewriteLocalLinksForVSCode();
+      setupDiagramWalkthroughs();
+      createStepList();
+      runStep(0);
+    </script>
+  </body>
+</html>

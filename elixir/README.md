@@ -61,7 +61,7 @@ mise exec -- elixir --version
 ## Run
 
 ```bash
-git clone https://github.com/openai/symphony
+git clone https://github.com/arthurkkp-theaico/symphony
 cd symphony/elixir
 mise trust
 mise install
@@ -112,6 +112,24 @@ You are working on a Linear issue {{ issue.identifier }}.
 Title: {{ issue.title }} Body: {{ issue.description }}
 ```
 
+For Jira, use an explicit HTTPS tenant endpoint and project key:
+
+```yaml
+tracker:
+  kind: jira
+  endpoint: https://your-company.atlassian.net
+  email: $JIRA_EMAIL
+  api_key: $JIRA_API_TOKEN
+  project_key: TEAM
+workspace:
+  root: ~/code/workspaces
+  github_repository: your-org/your-repo
+```
+
+Jira sessions receive only the guarded `jira_rest` tool; Linear sessions receive only
+`linear_graphql`. Jira issue mutations are limited to the current issue, its `## Codex Workpad`
+comment, and pull-request links from `workspace.github_repository`.
+
 Notes:
 
 - If a value is missing, defaults are used.
@@ -136,9 +154,16 @@ Notes:
   identifier, title, and body.
 - Use `hooks.after_create` to bootstrap a fresh workspace. For a Git-backed repo, you can run
   `git clone ... .` there, along with any other setup commands you need.
+- The sample `WORKFLOW.md` keeps GitHub as the default clone target and can switch to a local
+  dummy GitLab repo for demos:
+  - GitHub default: `SYMPHONY_REPO_PROVIDER=github`
+  - GitLab dummy: `SYMPHONY_REPO_PROVIDER=gitlab`
+  - Dummy URL default: `file://${HOME}/code/gitlab-dummy/symphony-dummy.git`
 - If a hook needs `mise exec` inside a freshly cloned workspace, trust the repo config and fetch
   the project dependencies in `hooks.after_create` before invoking `mise` later from other hooks.
-- `tracker.api_key` reads from `LINEAR_API_KEY` when unset or when value is `$LINEAR_API_KEY`.
+- Linear `tracker.api_key` reads from `LINEAR_API_KEY` when unset or when value is `$LINEAR_API_KEY`.
+- Jira requires `tracker.endpoint`, `tracker.email`, and `tracker.project_key`; auth reads from
+  `JIRA_EMAIL` and `JIRA_API_TOKEN`. `JIRA_ASSIGNEE_ACCOUNT_ID` optionally restricts routing.
 - For path values, `~` is expanded to the home directory.
 - For env-backed path values, use `$VAR`. `workspace.root` resolves `$VAR` before path handling,
   while `codex.command` stays a shell command string and any `$VAR` expansion there happens in the

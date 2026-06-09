@@ -1182,6 +1182,31 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     refute rendered =~ "Dashboard:"
   end
 
+  test "status dashboard renders jira board link in header" do
+    write_workflow_file!(
+      Workflow.workflow_file_path(),
+      tracker_kind: "jira",
+      tracker_endpoint: "https://example.atlassian.net",
+      tracker_email: "agent@example.com",
+      tracker_project_key: "SD",
+      tracker_board_url: "https://example.atlassian.net/jira/servicedesk/projects/SD/boards/1",
+      tracker_project_slug: nil
+    )
+
+    snapshot_data =
+      {:ok,
+       %{
+         running: [],
+         retrying: [],
+         codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+         rate_limits: nil
+       }}
+
+    rendered = StatusDashboard.format_snapshot_content_for_test(snapshot_data, 0.0)
+
+    assert rendered =~ "https://example.atlassian.net/jira/servicedesk/projects/SD/boards/1"
+  end
+
   test "status dashboard renders dashboard url on its own line when server port is configured" do
     previous_port_override = Application.get_env(:symphony_elixir, :server_port_override)
 

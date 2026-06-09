@@ -95,13 +95,17 @@ defmodule SymphonyElixir.TestSupport do
           tracker_kind: "linear",
           tracker_endpoint: "https://api.linear.app/graphql",
           tracker_api_token: "token",
+          tracker_email: nil,
           tracker_project_slug: "project",
+          tracker_project_key: nil,
+          tracker_board_url: nil,
           tracker_assignee: nil,
           tracker_required_labels: [],
           tracker_active_states: ["Todo", "In Progress"],
           tracker_terminal_states: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"],
           poll_interval_ms: 30_000,
           workspace_root: Path.join(System.tmp_dir!(), "symphony_workspaces"),
+          workspace_github_repository: nil,
           worker_ssh_hosts: [],
           worker_max_concurrent_agents_per_host: nil,
           max_concurrent_agents: 10,
@@ -133,13 +137,17 @@ defmodule SymphonyElixir.TestSupport do
     tracker_kind = Keyword.get(config, :tracker_kind)
     tracker_endpoint = Keyword.get(config, :tracker_endpoint)
     tracker_api_token = Keyword.get(config, :tracker_api_token)
+    tracker_email = Keyword.get(config, :tracker_email)
     tracker_project_slug = Keyword.get(config, :tracker_project_slug)
+    tracker_project_key = Keyword.get(config, :tracker_project_key)
+    tracker_board_url = Keyword.get(config, :tracker_board_url)
     tracker_assignee = Keyword.get(config, :tracker_assignee)
     tracker_required_labels = Keyword.get(config, :tracker_required_labels)
     tracker_active_states = Keyword.get(config, :tracker_active_states)
     tracker_terminal_states = Keyword.get(config, :tracker_terminal_states)
     poll_interval_ms = Keyword.get(config, :poll_interval_ms)
     workspace_root = Keyword.get(config, :workspace_root)
+    workspace_github_repository = Keyword.get(config, :workspace_github_repository)
     worker_ssh_hosts = Keyword.get(config, :worker_ssh_hosts)
     worker_max_concurrent_agents_per_host = Keyword.get(config, :worker_max_concurrent_agents_per_host)
     max_concurrent_agents = Keyword.get(config, :max_concurrent_agents)
@@ -172,7 +180,10 @@ defmodule SymphonyElixir.TestSupport do
         "  kind: #{yaml_value(tracker_kind)}",
         "  endpoint: #{yaml_value(tracker_endpoint)}",
         "  api_key: #{yaml_value(tracker_api_token)}",
+        "  email: #{yaml_value(tracker_email)}",
         "  project_slug: #{yaml_value(tracker_project_slug)}",
+        "  project_key: #{yaml_value(tracker_project_key)}",
+        "  board_url: #{yaml_value(tracker_board_url)}",
         "  assignee: #{yaml_value(tracker_assignee)}",
         "  required_labels: #{yaml_value(tracker_required_labels)}",
         "  active_states: #{yaml_value(tracker_active_states)}",
@@ -181,6 +192,7 @@ defmodule SymphonyElixir.TestSupport do
         "  interval_ms: #{yaml_value(poll_interval_ms)}",
         "workspace:",
         "  root: #{yaml_value(workspace_root)}",
+        "  github_repository: #{yaml_value(workspace_github_repository)}",
         worker_yaml(worker_ssh_hosts, worker_max_concurrent_agents_per_host),
         "agent:",
         "  max_concurrent_agents: #{yaml_value(max_concurrent_agents)}",

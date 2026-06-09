@@ -16,7 +16,7 @@ behavior.
 ## 1. Problem Statement
 
 Symphony is a long-running automation service that continuously reads work from an issue tracker
-(Linear in this specification version), creates an isolated workspace for each issue, and runs a
+(Linear or Jira), creates an isolated workspace for each issue, and runs a
 coding agent session for that issue inside the workspace.
 
 The service solves four operational problems:
@@ -129,7 +129,7 @@ Symphony is easiest to port when kept in these layers:
 4. `Execution Layer` (workspace + agent subprocess)
    - Filesystem lifecycle, workspace preparation, coding-agent protocol.
 
-5. `Integration Layer` (Linear adapter)
+5. `Integration Layer` (tracker adapters)
    - API calls and normalization for tracker data.
 
 6. `Observability Layer` (logs + OPTIONAL status surface)
@@ -137,7 +137,7 @@ Symphony is easiest to port when kept in these layers:
 
 ### 3.3 External Dependencies
 
-- Issue tracker API (Linear for `tracker.kind: linear` in this specification version).
+- Issue tracker API (Linear for `tracker.kind: linear` or Jira for `tracker.kind: jira`).
 - Local filesystem for workspaces and logs.
 - OPTIONAL workspace population tooling (for example Git CLI, if used).
 - Coding-agent executable that supports the targeted Codex app-server mode.
@@ -349,15 +349,28 @@ Fields:
 
 - `kind` (string)
   - REQUIRED for dispatch.
-  - Current supported value: `linear`
+  - Current supported values: `linear`, `jira`
 - `endpoint` (string)
   - Default for `tracker.kind == "linear"`: `https://api.linear.app/graphql`
+  - REQUIRED for `tracker.kind == "jira"` and MUST be an HTTPS Jira base URL without credentials,
+    query parameters, or fragments.
 - `api_key` (string)
   - MAY be a literal token or `$VAR_NAME`.
   - Canonical environment variable for `tracker.kind == "linear"`: `LINEAR_API_KEY`.
+  - Canonical environment variable for `tracker.kind == "jira"`: `JIRA_API_TOKEN`.
   - If `$VAR_NAME` resolves to an empty string, treat the key as missing.
+- `email` (string)
+  - REQUIRED for `tracker.kind == "jira"`.
+  - Canonical environment variable: `JIRA_EMAIL`.
 - `project_slug` (string)
   - REQUIRED for dispatch when `tracker.kind == "linear"`.
+- `project_key` (string)
+  - REQUIRED for dispatch when `tracker.kind == "jira"`.
+- `board_url` (string, OPTIONAL)
+  - Operator-facing Jira board link for status surfaces.
+- `assignee` (string, OPTIONAL)
+  - Restricts routing to one tracker assignee.
+  - Canonical Jira environment variable: `JIRA_ASSIGNEE_ACCOUNT_ID`.
 - `required_labels` (list of strings)
   - Default: `[]`.
   - An issue MUST contain every configured label to dispatch or continue.
@@ -385,6 +398,9 @@ Fields:
   - `~` is expanded.
   - Relative paths are resolved relative to the directory containing `WORKFLOW.md`.
   - The effective workspace root is normalized to an absolute path before use.
+- `github_repository` (string, OPTIONAL)
+  - Repository in `owner/name` form used to verify Jira-linked pull requests before terminal
+    transitions.
 
 #### 5.3.4 `hooks` (object)
 
@@ -479,8 +495,8 @@ Template input variables:
 
 Fallback prompt behavior:
 
-- If the workflow prompt body is empty, the runtime MAY use a minimal default prompt
-  (`You are working on an issue from Linear.`).
+- If the workflow prompt body is empty, the runtime MAY use a minimal tracker-neutral default prompt
+  (`You are working on a tracker issue.`).
 - Workflow file read/parse failures are configuration/validation errors and SHOULD NOT silently fall
   back to a prompt.
 
@@ -566,7 +582,8 @@ Validation checks:
 - Workflow file can be loaded and parsed.
 - `tracker.kind` is present and supported.
 - `tracker.api_key` is present after `$` resolution.
-- `tracker.project_slug` is present when REQUIRED by the selected tracker kind.
+- `tracker.project_slug` is present for Linear.
+- `tracker.endpoint`, `tracker.email`, and `tracker.project_key` are present and valid for Jira.
 - `codex.command` is present and non-empty.
 
 ### 6.4 Core Config Fields Summary (Cheat Sheet)
@@ -575,15 +592,21 @@ This section is intentionally redundant so a coding agent can implement the conf
 Extension fields are documented in the extension section that defines them. Core conformance does
 not require recognizing or validating extension fields unless that extension is implemented.
 
-- `tracker.kind`: string, REQUIRED, currently `linear`
+- `tracker.kind`: string, REQUIRED, currently `linear` or `jira`
 - `tracker.endpoint`: string, default `https://api.linear.app/graphql` when `tracker.kind=linear`
-- `tracker.api_key`: string or `$VAR`, canonical env `LINEAR_API_KEY` when `tracker.kind=linear`
+- `tracker.api_key`: string or `$VAR`, canonical env `LINEAR_API_KEY` for Linear or `JIRA_API_TOKEN`
+  for Jira
+- `tracker.email`: string or `$VAR`, REQUIRED for Jira, canonical env `JIRA_EMAIL`
 - `tracker.project_slug`: string, REQUIRED when `tracker.kind=linear`
+- `tracker.project_key`: string, REQUIRED when `tracker.kind=jira`
+- `tracker.board_url`: string, OPTIONAL operator-facing tracker link
+- `tracker.assignee`: string or `$VAR`, OPTIONAL tracker routing identity
 - `tracker.required_labels`: list of strings, default `[]`
 - `tracker.active_states`: list of strings, default `["Todo", "In Progress"]`
 - `tracker.terminal_states`: list of strings, default `["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]`
 - `polling.interval_ms`: integer, default `30000`
 - `workspace.root`: path resolved to absolute, default `<system-temp>/symphony_workspaces`
+- `workspace.github_repository`: optional GitHub repository in `owner/name` form
 - `hooks.after_create`: shell script or null
 - `hooks.before_run`: shell script or null
 - `hooks.after_run`: shell script or null
@@ -1055,7 +1078,9 @@ Unsupported dynamic tool calls:
 Optional client-side tool extension:
 
 - An implementation MAY expose a limited set of client-side tools to the app-server session.
-- Current standardized optional tool: `linear_graphql`.
+- Current standardized optional tools: `linear_graphql` and `jira_rest`.
+- Tool advertisement and dispatch MUST be scoped to the configured tracker kind. A Linear session
+  MUST NOT expose or execute Jira tools, and a Jira session MUST NOT expose or execute Linear tools.
 - If implemented, supported tools SHOULD be advertised to the app-server session during startup
   using the protocol mechanism supported by the targeted Codex app-server version.
 - Unsupported tool names SHOULD still return a failure result using the targeted protocol and
@@ -1093,6 +1118,28 @@ Optional client-side tool extension:
   - invalid input, missing auth, or transport failure -> `success=false` with an error payload
 - Return the GraphQL response or error payload as structured tool output that the model can inspect
   in-session.
+
+`jira_rest` extension contract:
+
+- Purpose: execute Jira Cloud REST operations using Symphony's configured Jira account email and API
+  token without exposing those credentials to the coding agent.
+- Availability: only when `tracker.kind == "jira"` and valid Jira auth and endpoint configuration are
+  present.
+- Input MUST contain `method` and a canonical relative `/rest/` path; `body` MAY contain a JSON object,
+  array, or null.
+- Absolute URLs, fragments, traversal segments, residual percent encoding, and non-REST paths MUST be
+  rejected before transport dispatch.
+- Read-only `GET` requests MAY target canonical Jira REST paths.
+- Mutations MUST be limited to workflow operations: issue creation, issue search, issue links, issue
+  comments, remote links, and guarded issue transitions.
+- `PUT` and `DELETE` MUST be limited to individual comment and remote-link resources. Direct issue
+  deletion, direct issue updates, bulk status mutation, and administrative routes MUST be rejected.
+- Issue transitions MUST resolve the requested transition before mutation. A transition into Jira's
+  `done` category MUST be blocked unless the issue is currently `Merging` and exactly one linked pull
+  request from the configured GitHub repository is verified as merged with a branch matching the Jira
+  issue key.
+- Invalid input, blocked mutations, missing auth, and transport failures MUST return `success=false`
+  with a structured error payload.
 
 User-input-required policy:
 
@@ -1138,7 +1185,7 @@ Note:
 
 - Workspaces are intentionally preserved after successful runs.
 
-## 11. Issue Tracker Integration Contract (Linear-Compatible)
+## 11. Issue Tracker Integration Contract
 
 ### 11.1 REQUIRED Operations
 
@@ -1178,7 +1225,22 @@ Important:
 A non-Linear implementation MAY change transport details, but the normalized outputs MUST match the
 domain model in Section 4.
 
-### 11.3 Normalization Rules
+### 11.3 Query Semantics (Jira)
+
+Jira-specific requirements for `tracker.kind == "jira"`:
+
+- Use the explicitly configured HTTPS Jira base URL; Jira MUST NOT inherit Linear's endpoint default.
+- Authenticate Jira Cloud REST requests with the configured account email and API token.
+- `tracker.project_key` selects the project in JQL candidate queries.
+- Candidate and state queries use configured state names and MAY restrict results by the configured
+  Jira assignee account ID.
+- Search pagination MUST preserve issue order and follow Jira `nextPageToken` until the final page.
+- Normalize Jira ADF descriptions to text, labels to lowercase, and inward `is blocked by` issue links
+  to blocker references.
+- Page size default: `50`.
+- Network timeout: `30000 ms`.
+
+### 11.4 Normalization Rules
 
 Candidate issue normalization SHOULD produce fields listed in Section 4.1.1.
 
@@ -1191,18 +1253,26 @@ Additional normalization details:
 - `priority` -> integer only (non-integers become null)
 - `created_at` and `updated_at` -> parse ISO-8601 timestamps
 
-### 11.4 Error Handling Contract
+### 11.5 Error Handling Contract
 
 RECOMMENDED error categories:
 
 - `unsupported_tracker_kind`
 - `missing_tracker_api_key`
 - `missing_tracker_project_slug`
+- `missing_jira_api_token`
+- `missing_jira_email`
+- `missing_jira_endpoint`
+- `invalid_jira_endpoint`
+- `missing_jira_project_key`
 - `linear_api_request` (transport failures)
 - `linear_api_status` (non-200 HTTP)
 - `linear_graphql_errors`
 - `linear_unknown_payload`
 - `linear_missing_end_cursor` (pagination integrity error)
+- `jira_api_request` (transport failures)
+- `jira_api_status` (non-2xx HTTP)
+- `jira_unknown_payload`
 
 Orchestrator behavior on tracker errors:
 
@@ -1210,7 +1280,7 @@ Orchestrator behavior on tracker errors:
 - Running-state refresh failure: log and keep active workers running.
 - Startup terminal cleanup failure: log warning and continue startup.
 
-### 11.5 Tracker Writes (Important Boundary)
+### 11.6 Tracker Writes (Important Boundary)
 
 Symphony does not require first-class tracker write APIs in the orchestrator.
 
@@ -1221,6 +1291,7 @@ Symphony does not require first-class tracker write APIs in the orchestrator.
   `Human Review`) rather than tracker terminal state `Done`.
 - If the `linear_graphql` client-side tool extension is implemented, it is still part of the agent
   toolchain rather than orchestrator business logic.
+- The same boundary applies to the guarded `jira_rest` client-side tool extension.
 
 ## 12. Prompt Construction and Context Assembly
 
@@ -1537,7 +1608,7 @@ API design notes:
 1. `Workflow/Config Failures`
    - Missing `WORKFLOW.md`
    - Invalid YAML front matter
-   - Unsupported tracker kind or missing tracker credentials/project slug
+   - Unsupported tracker kind or missing tracker credentials/project identifier
    - Missing coding-agent executable
 
 2. `Workspace Failures`
@@ -1956,9 +2027,11 @@ Unless otherwise noted, Sections 17.1 through 17.7 are `Core Conformance`. Bulle
 - Invalid YAML front matter returns typed error
 - Front matter non-map returns typed error
 - Config defaults apply when OPTIONAL values are missing
-- `tracker.kind` validation enforces currently supported kind (`linear`)
+- `tracker.kind` validation enforces currently supported kinds (`linear`, `jira`)
 - `tracker.api_key` works (including `$VAR` indirection)
 - `$VAR` resolution works for tracker API key and path values
+- Jira requires an explicit HTTPS endpoint, account email, API token, and project key
+- Jira never inherits Linear's endpoint default
 - `~` path expansion works
 - `codex.command` is preserved as a shell command string
 - Per-state concurrency override map normalizes state names and ignores invalid values
@@ -1982,7 +2055,7 @@ Unless otherwise noted, Sections 17.1 through 17.7 are `Core Conformance`. Bulle
 
 ### 17.3 Issue Tracker Client
 
-- Candidate issue fetch uses active states and project slug
+- Candidate issue fetch uses active states and the selected tracker's project identifier
 - Linear query uses the specified project filter field (`slugId`)
 - Empty `fetch_issues_by_states([])` returns empty without API call
 - Pagination preserves order across multiple pages
@@ -1991,6 +2064,9 @@ Unless otherwise noted, Sections 17.1 through 17.7 are `Core Conformance`. Bulle
 - Issue state refresh by ID returns minimal normalized issues
 - Issue state refresh query uses GraphQL ID typing (`[ID!]`) as specified in Section 11.2
 - Error mapping for request errors, non-200, GraphQL errors, malformed payloads
+- Jira JQL search uses the configured project and states and follows `nextPageToken` pagination
+- Jira issue normalization covers ADF descriptions, labels, blockers, assignee IDs, and timestamps
+- Jira request errors, non-2xx responses, and malformed search payloads return typed errors
 
 ### 17.4 Orchestrator Dispatch, Reconciliation, and Retry
 
@@ -2033,12 +2109,22 @@ Unless otherwise noted, Sections 17.1 through 17.7 are `Core Conformance`. Bulle
   targeted protocol
 - If client-side tools are implemented, session startup advertises the supported tool specs
   using the targeted app-server protocol
+- Client-side tools are advertised and dispatched only for the configured tracker kind
 - If the `linear_graphql` client-side tool extension is implemented:
   - the tool is advertised to the session
   - valid `query` / `variables` inputs execute against configured Linear auth
   - top-level GraphQL `errors` produce `success=false` while preserving the GraphQL body
   - invalid arguments, missing auth, and transport failures return structured failure payloads
   - unsupported tool names still fail without stalling the session
+- If the `jira_rest` client-side tool extension is implemented:
+  - the tool is advertised only to Jira sessions and uses configured Jira auth
+  - canonical Jira reads and allowlisted workflow mutations succeed
+  - cross-issue, non-workpad comment, unrelated remote-link, destructive, and administrative
+    mutations fail before dispatch
+  - transitions into `Merging` fail because human approval owns that transition
+  - configured terminal transitions require `Merging` plus a merged, issue-matching pull request
+  - invalid arguments, missing auth, blocked policy operations, and transport failures return
+    structured failure payloads
 
 ### 17.6 Observability
 
@@ -2108,12 +2194,14 @@ Use the same validation profiles as Section 17:
   exposes the baseline endpoints/error semantics in Section 13.7 if shipped.
 - `linear_graphql` client-side tool extension exposes raw Linear GraphQL access through the
   app-server session using configured Symphony auth.
+- `jira_rest` client-side tool extension exposes tracker-scoped Jira REST access with guarded
+  workflow mutations and terminal transitions.
 - TODO: Persist retry queue and session metadata across process restarts.
 - TODO: Make observability settings configurable in workflow front matter without prescribing UI
   implementation details.
 - TODO: Add first-class tracker write APIs (comments/state transitions) in the orchestrator instead
   of only via agent tools.
-- TODO: Add pluggable issue tracker adapters beyond Linear.
+- TODO: Add pluggable issue tracker adapters beyond Linear and Jira.
 
 ### 18.3 Operational Validation Before Production (RECOMMENDED)
 

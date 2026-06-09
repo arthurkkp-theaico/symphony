@@ -49,6 +49,56 @@ defmodule Mix.Tasks.Workspace.BeforeRemoveTest do
     end)
   end
 
+  test "no-ops for gitlab provider" do
+    with_fake_gh(fn log_path ->
+      File.write!(log_path, "")
+
+      output =
+        capture_io(fn ->
+          BeforeRemove.run(["--provider", "gitlab", "--branch", "feature/gitlab-dummy"])
+        end)
+
+      assert output == ""
+      assert File.read!(log_path) == ""
+    end)
+  end
+
+  test "no-ops when repository review cleanup is disabled" do
+    with_fake_gh(fn log_path ->
+      File.write!(log_path, "")
+
+      output =
+        capture_io(fn ->
+          BeforeRemove.run(["--provider", "none", "--branch", "feature/local-only"])
+        end)
+
+      assert output == ""
+      assert File.read!(log_path) == ""
+    end)
+  end
+
+  test "reads provider from environment" do
+    with_env(%{"SYMPHONY_REPO_PROVIDER" => "gitlab"}, fn ->
+      with_fake_gh(fn log_path ->
+        File.write!(log_path, "")
+
+        output =
+          capture_io(fn ->
+            BeforeRemove.run(["--branch", "feature/env-gitlab"])
+          end)
+
+        assert output == ""
+        assert File.read!(log_path) == ""
+      end)
+    end)
+  end
+
+  test "fails for unsupported repository provider" do
+    assert_raise Mix.Error, ~r/Unsupported repository provider/, fn ->
+      BeforeRemove.run(["--provider", "bitbucket", "--branch", "feature/wat"])
+    end
+  end
+
   test "uses current branch for lookup when branch option is omitted" do
     with_fake_gh_and_git(
       """
@@ -92,10 +142,10 @@ defmodule Mix.Tasks.Workspace.BeforeRemoveTest do
         log = File.read!(log_path)
 
         assert log =~
-                 "pr list --repo openai/symphony --head feature/workpad --state open --json number --jq .[].number"
+                 "pr list --repo arthurkkp-theaico/symphony --head feature/workpad --state open --json number --jq .[].number"
 
-        assert log =~ "pr close 101 --repo openai/symphony"
-        assert log =~ "pr close 102 --repo openai/symphony"
+        assert log =~ "pr close 101 --repo arthurkkp-theaico/symphony"
+        assert log =~ "pr close 102 --repo arthurkkp-theaico/symphony"
       end
     )
   end
@@ -115,9 +165,9 @@ defmodule Mix.Tasks.Workspace.BeforeRemoveTest do
       log = File.read!(log_path)
 
       assert log =~ "auth status"
-      assert log =~ "pr list --repo openai/symphony --head feature/workpad --state open --json number --jq .[].number"
-      assert log =~ "pr close 101 --repo openai/symphony"
-      assert log =~ "pr close 102 --repo openai/symphony"
+      assert log =~ "pr list --repo arthurkkp-theaico/symphony --head feature/workpad --state open --json number --jq .[].number"
+      assert log =~ "pr close 101 --repo arthurkkp-theaico/symphony"
+      assert log =~ "pr close 102 --repo arthurkkp-theaico/symphony"
 
       {second_output, error_output} =
         capture_task_output(fn ->
@@ -161,8 +211,8 @@ defmodule Mix.Tasks.Workspace.BeforeRemoveTest do
         assert error_output =~ "Failed to close PR #102 for branch feature/no-output: exit 17"
         refute error_output =~ "output="
         log = File.read!(log_path)
-        assert log =~ "pr list --repo openai/symphony --head feature/no-output --state open --json number --jq .[].number"
-        assert log =~ "pr close 102 --repo openai/symphony"
+        assert log =~ "pr list --repo arthurkkp-theaico/symphony --head feature/no-output --state open --json number --jq .[].number"
+        assert log =~ "pr close 102 --repo arthurkkp-theaico/symphony"
       end
     )
   end
@@ -195,7 +245,7 @@ defmodule Mix.Tasks.Workspace.BeforeRemoveTest do
         assert log =~ "auth status"
 
         assert log =~
-                 "pr list --repo openai/symphony --head feature/list-fails --state open --json number --jq .[].number"
+                 "pr list --repo arthurkkp-theaico/symphony --head feature/list-fails --state open --json number --jq .[].number"
 
         refute log =~ "pr close"
       end

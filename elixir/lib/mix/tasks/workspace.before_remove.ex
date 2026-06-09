@@ -1,10 +1,11 @@
 defmodule Mix.Tasks.Workspace.BeforeRemove do
   use Mix.Task
 
-  @shortdoc "Close open GitHub PRs for the current branch before workspace removal"
+  @shortdoc "Close open review requests for the current branch before workspace removal"
 
   @moduledoc """
-  Closes open pull requests for the current Git branch.
+  Closes open review requests for the current Git branch when the configured
+  repository provider supports it.
 
   This task is intended for use from the `before_remove` workspace hook.
 
@@ -12,16 +13,18 @@ defmodule Mix.Tasks.Workspace.BeforeRemove do
 
       mix workspace.before_remove
       mix workspace.before_remove --branch feature/my-branch
-      mix workspace.before_remove --repo openai/symphony
+      mix workspace.before_remove --repo arthurkkp-theaico/symphony
+      mix workspace.before_remove --provider gitlab --branch feature/my-branch
   """
 
-  @default_repo "openai/symphony"
+  @default_provider "github"
+  @default_github_repo "arthurkkp-theaico/symphony"
 
   @impl Mix.Task
   def run(args) do
     {opts, _argv, invalid} =
       OptionParser.parse(args,
-        strict: [branch: :string, help: :boolean, repo: :string],
+        strict: [branch: :string, help: :boolean, provider: :string, repo: :string],
         aliases: [h: :help]
       )
 
@@ -33,16 +36,17 @@ defmodule Mix.Tasks.Workspace.BeforeRemove do
         Mix.raise("Invalid option(s): #{inspect(invalid)}")
 
       true ->
-        repo = opts[:repo] || @default_repo
+        provider = opts[:provider] || System.get_env("SYMPHONY_REPO_PROVIDER") || @default_provider
+        repo = opts[:repo] || default_repo(provider)
         branch = opts[:branch] || current_branch()
 
-        maybe_close_open_pull_requests(repo, branch)
+        maybe_close_open_review_requests(provider, repo, branch)
     end
   end
 
-  defp maybe_close_open_pull_requests(_repo, nil), do: :ok
+  defp maybe_close_open_review_requests(_provider, _repo, nil), do: :ok
 
-  defp maybe_close_open_pull_requests(repo, branch) do
+  defp maybe_close_open_review_requests("github", repo, branch) do
     if gh_available?() and gh_authenticated?() do
       repo
       |> list_open_pull_request_numbers(branch)
@@ -51,6 +55,16 @@ defmodule Mix.Tasks.Workspace.BeforeRemove do
 
     :ok
   end
+
+  defp maybe_close_open_review_requests("gitlab", _repo, _branch), do: :ok
+  defp maybe_close_open_review_requests("none", _repo, _branch), do: :ok
+
+  defp maybe_close_open_review_requests(provider, _repo, _branch) do
+    Mix.raise("Unsupported repository provider: #{inspect(provider)}")
+  end
+
+  defp default_repo("github"), do: System.get_env("SYMPHONY_GITHUB_REPO") || @default_github_repo
+  defp default_repo(_provider), do: nil
 
   defp gh_available? do
     not is_nil(System.find_executable("gh"))
@@ -106,7 +120,7 @@ defmodule Mix.Tasks.Workspace.BeforeRemove do
   end
 
   defp closing_comment(branch) do
-    "Closing because the Linear issue for branch #{branch} entered a terminal state without merge."
+    "Closing because the tracker issue for branch #{branch} entered a terminal state without merge."
   end
 
   defp format_output(""), do: ""

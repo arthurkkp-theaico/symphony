@@ -39,6 +39,36 @@ defmodule SymphonyElixir.ExtensionsTest do
     end
   end
 
+  defmodule FakeJiraClient do
+    def fetch_candidate_issues do
+      send(self(), :jira_fetch_candidate_issues_called)
+      {:ok, [:jira_candidate]}
+    end
+
+    def fetch_issues_by_states(states) do
+      send(self(), {:jira_fetch_issues_by_states_called, states})
+      {:ok, states}
+    end
+
+    def fetch_issue_states_by_ids(issue_ids) do
+      send(self(), {:jira_fetch_issue_states_by_ids_called, issue_ids})
+      {:ok, issue_ids}
+    end
+
+    def rest(method, path, body) do
+      send(self(), {:jira_rest_called, method, path, body})
+
+      case Process.get({__MODULE__, :rest_results}) do
+        [result | rest] ->
+          Process.put({__MODULE__, :rest_results}, rest)
+          result
+
+        _ ->
+          Process.get({__MODULE__, :rest_result})
+      end
+    end
+  end
+
   defmodule SlowOrchestrator do
     use GenServer
 
@@ -79,12 +109,19 @@ defmodule SymphonyElixir.ExtensionsTest do
 
   setup do
     linear_client_module = Application.get_env(:symphony_elixir, :linear_client_module)
+    jira_client_module = Application.get_env(:symphony_elixir, :jira_client_module)
 
     on_exit(fn ->
       if is_nil(linear_client_module) do
         Application.delete_env(:symphony_elixir, :linear_client_module)
       else
         Application.put_env(:symphony_elixir, :linear_client_module, linear_client_module)
+      end
+
+      if is_nil(jira_client_module) do
+        Application.delete_env(:symphony_elixir, :jira_client_module)
+      else
+        Application.put_env(:symphony_elixir, :jira_client_module, jira_client_module)
       end
     end)
 
@@ -181,7 +218,7 @@ defmodule SymphonyElixir.ExtensionsTest do
     WorkflowStore.force_reload()
   end
 
-  test "tracker delegates to memory and linear adapters" do
+  test "tracker delegates to memory, linear, and jira adapters" do
     issue = %Issue{id: "issue-1", identifier: "MT-1", state: "In Progress"}
     Application.put_env(:symphony_elixir, :memory_tracker_issues, [issue, %{id: "ignored"}])
     Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
@@ -203,6 +240,17 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "linear")
     assert SymphonyElixir.Tracker.adapter() == Adapter
+
+    write_workflow_file!(
+      Workflow.workflow_file_path(),
+      tracker_kind: "jira",
+      tracker_endpoint: "https://example.atlassian.net",
+      tracker_email: "agent@example.com",
+      tracker_project_key: "SD",
+      tracker_project_slug: nil
+    )
+
+    assert SymphonyElixir.Tracker.adapter() == SymphonyElixir.Jira.Adapter
   end
 
   test "linear adapter delegates reads and validates mutation responses" do
@@ -317,6 +365,74 @@ defmodule SymphonyElixir.ExtensionsTest do
     )
 
     assert {:error, :issue_update_failed} = Adapter.update_issue_state("issue-1", "Odd")
+  end
+
+  test "jira adapter delegates reads and validates mutation responses" do
+    Application.put_env(:symphony_elixir, :jira_client_module, FakeJiraClient)
+
+    assert {:ok, [:jira_candidate]} = SymphonyElixir.Jira.Adapter.fetch_candidate_issues()
+    assert_receive :jira_fetch_candidate_issues_called
+
+    assert {:ok, ["Todo"]} = SymphonyElixir.Jira.Adapter.fetch_issues_by_states(["Todo"])
+    assert_receive {:jira_fetch_issues_by_states_called, ["Todo"]}
+
+    assert {:ok, ["10001"]} = SymphonyElixir.Jira.Adapter.fetch_issue_states_by_ids(["10001"])
+    assert_receive {:jira_fetch_issue_states_by_ids_called, ["10001"]}
+
+    Process.put({FakeJiraClient, :rest_result}, {:ok, %{"id" => "comment-1"}})
+
+    assert :ok = SymphonyElixir.Jira.Adapter.create_comment("SD-1", "hello")
+    assert_receive {:jira_rest_called, "POST", "/rest/api/3/issue/SD-1/comment", comment_body}
+    assert get_in(comment_body, ["body", "type"]) == "doc"
+    assert get_in(comment_body, ["body", "content", Access.at(0), "content", Access.at(0), "text"]) == "hello"
+
+    Process.put(
+      {FakeJiraClient, :rest_results},
+      [
+        {:ok,
+         %{
+           "transitions" => [
+             %{"id" => "31", "name" => "Finish merge", "to" => %{"name" => "Done"}}
+           ]
+         }},
+        {:ok, %{}}
+      ]
+    )
+
+    assert :ok = SymphonyElixir.Jira.Adapter.update_issue_state("SD-1", "done")
+    assert_receive {:jira_rest_called, "GET", "/rest/api/3/issue/SD-1/transitions", nil}
+
+    assert_receive {:jira_rest_called, "POST", "/rest/api/3/issue/SD-1/transitions", %{"transition" => %{"id" => "31"}}}
+
+    Process.put({FakeJiraClient, :rest_results}, [{:ok, %{"transitions" => []}}])
+    assert {:error, :state_not_found} = SymphonyElixir.Jira.Adapter.update_issue_state("SD-1", "Missing")
+
+    Process.put({FakeJiraClient, :rest_results}, [{:error, :comment_failed}])
+    assert {:error, :comment_failed} = SymphonyElixir.Jira.Adapter.create_comment("SD-1", "hello")
+
+    Process.put({FakeJiraClient, :rest_results}, [{:error, :transition_fetch_failed}])
+
+    assert {:error, :transition_fetch_failed} =
+             SymphonyElixir.Jira.Adapter.update_issue_state("SD-1", "Done")
+
+    Process.put(
+      {FakeJiraClient, :rest_results},
+      [
+        {:ok,
+         %{
+           "transitions" => [
+             %{"id" => "31", "name" => "Finish merge", "to" => %{"name" => "Done"}}
+           ]
+         }},
+        :unexpected
+      ]
+    )
+
+    assert {:error, :issue_update_failed} =
+             SymphonyElixir.Jira.Adapter.update_issue_state("SD-1", "Done")
+
+    Process.put({FakeJiraClient, :rest_results}, [{:ok, %{"transitions" => [:unexpected]}}])
+    assert {:error, :state_not_found} = SymphonyElixir.Jira.Adapter.update_issue_state("SD-1", "Done")
   end
 
   test "phoenix observability api preserves state, issue, and refresh responses" do

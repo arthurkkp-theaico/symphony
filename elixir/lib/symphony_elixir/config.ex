@@ -7,7 +7,7 @@ defmodule SymphonyElixir.Config do
   alias SymphonyElixir.Workflow
 
   @default_prompt_template """
-  You are working on a Linear issue.
+  You are working on a tracker issue.
 
   Identifier: {{ issue.identifier }}
   Title: {{ issue.title }}
@@ -119,18 +119,46 @@ defmodule SymphonyElixir.Config do
       is_nil(settings.tracker.kind) ->
         {:error, :missing_tracker_kind}
 
-      settings.tracker.kind not in ["linear", "memory"] ->
+      settings.tracker.kind not in ["linear", "jira", "memory"] ->
         {:error, {:unsupported_tracker_kind, settings.tracker.kind}}
 
-      settings.tracker.kind == "linear" and not is_binary(settings.tracker.api_key) ->
-        {:error, :missing_linear_api_token}
-
-      settings.tracker.kind == "linear" and not is_binary(settings.tracker.project_slug) ->
-        {:error, :missing_linear_project_slug}
-
       true ->
-        :ok
+        validate_tracker_semantics(settings.tracker)
     end
+  end
+
+  defp validate_tracker_semantics(%{kind: "linear"} = tracker) do
+    cond do
+      not is_binary(tracker.api_key) -> {:error, :missing_linear_api_token}
+      not is_binary(tracker.project_slug) -> {:error, :missing_linear_project_slug}
+      true -> :ok
+    end
+  end
+
+  defp validate_tracker_semantics(%{kind: "jira"} = tracker) do
+    cond do
+      not is_binary(tracker.api_key) -> {:error, :missing_jira_api_token}
+      not is_binary(tracker.email) -> {:error, :missing_jira_email}
+      not is_binary(tracker.endpoint) -> {:error, :missing_jira_endpoint}
+      not valid_jira_endpoint?(tracker.endpoint) -> {:error, :invalid_jira_endpoint}
+      not is_binary(tracker.project_key) -> {:error, :missing_jira_project_key}
+      true -> :ok
+    end
+  end
+
+  defp validate_tracker_semantics(_tracker), do: :ok
+
+  defp valid_jira_endpoint?(endpoint) do
+    case URI.parse(endpoint) do
+      %URI{scheme: "https", host: host, userinfo: nil, query: nil, fragment: nil}
+      when is_binary(host) and host != "" ->
+        true
+
+      _other ->
+        false
+    end
+  rescue
+    ArgumentError -> false
   end
 
   defp format_config_error(reason) do

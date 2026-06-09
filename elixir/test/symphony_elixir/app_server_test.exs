@@ -491,20 +491,21 @@ defmodule SymphonyElixir.AppServerTest do
                    |> String.trim_leading("JSON:")
                    |> Jason.decode!()
 
+                 dynamic_tools = get_in(payload, ["params", "dynamicTools"]) || []
+
                  payload["id"] == 2 and
-                   case get_in(payload, ["params", "dynamicTools"]) do
-                     [
-                       %{
-                         "description" => description,
-                         "inputSchema" => %{"required" => ["query"]},
-                         "name" => "linear_graphql"
-                       }
-                     ] ->
+                   Enum.map(dynamic_tools, & &1["name"]) == ["linear_graphql"] and
+                   Enum.any?(dynamic_tools, fn
+                     %{
+                       "description" => description,
+                       "inputSchema" => %{"required" => ["query"]},
+                       "name" => "linear_graphql"
+                     } ->
                        description =~ "Linear"
 
                      _ ->
                        false
-                   end
+                   end)
                else
                  false
                end
