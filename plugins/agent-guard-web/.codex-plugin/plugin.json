@@ -1,0 +1,26 @@
+{
+  "name": "agent-guard-web",
+  "version": "0.1.0",
+  "description": "Blocks supported web-access tools and quarantines prompt-injection output.",
+  "author": {
+    "name": "The AI Company",
+    "email": "poon@theaicompany.org",
+    "url": "https://github.com/arthurkkp-theaico"
+  },
+  "homepage": "https://github.com/arthurkkp-theaico/symphony/tree/main/plugins/agent-guard-web",
+  "repository": "https://github.com/arthurkkp-theaico/symphony",
+  "license": "Apache-2.0",
+  "keywords": ["security", "guardrails", "web", "hooks"],
+  "interface": {
+    "displayName": "Agent Guard: Web Access",
+    "shortDescription": "Block supported web tools and injected output",
+    "longDescription": "Demonstrates deny-by-policy checks before supported web-access tools run and quarantines suspicious instructions after tools return.",
+    "developerName": "The AI Company",
+    "category": "Security",
+    "capabilities": ["Policy Enforcement", "Audit"],
+    "defaultPrompt": [
+      "Show which web-access actions this guard blocks.",
+      "Review the latest guardrail audit decisions."
+    ]
+  }
+}

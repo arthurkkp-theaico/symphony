@@ -34,6 +34,11 @@ help with the setup:
 > Set up Symphony for my repository based on
 > https://github.com/arthurkkp-theaico/symphony/blob/main/elixir/README.md
 
+## Guardrail plugin demos
+
+The [`plugins/`](plugins/) directory contains installable Codex plugins that demonstrate pre-tool
+policy enforcement, post-tool result quarantine, and privacy-preserving audit logs.
+
 ---
 
 ## License

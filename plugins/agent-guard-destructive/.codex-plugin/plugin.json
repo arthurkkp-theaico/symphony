@@ -1,0 +1,26 @@
+{
+  "name": "agent-guard-destructive",
+  "version": "0.1.0",
+  "description": "Blocks destructive commands and quarantines suspicious side-effect output.",
+  "author": {
+    "name": "The AI Company",
+    "email": "poon@theaicompany.org",
+    "url": "https://github.com/arthurkkp-theaico"
+  },
+  "homepage": "https://github.com/arthurkkp-theaico/symphony/tree/main/plugins/agent-guard-destructive",
+  "repository": "https://github.com/arthurkkp-theaico/symphony",
+  "license": "Apache-2.0",
+  "keywords": ["security", "guardrails", "destructive-actions", "hooks"],
+  "interface": {
+    "displayName": "Agent Guard: Destructive Actions",
+    "shortDescription": "Block high-impact commands and tool calls",
+    "longDescription": "Demonstrates command-level policy checks before destructive actions and quarantines results that indicate unexpected high-impact side effects.",
+    "developerName": "The AI Company",
+    "category": "Security",
+    "capabilities": ["Policy Enforcement", "Audit"],
+    "defaultPrompt": [
+      "Show which destructive actions this guard blocks.",
+      "Review the latest guardrail audit decisions."
+    ]
+  }
+}

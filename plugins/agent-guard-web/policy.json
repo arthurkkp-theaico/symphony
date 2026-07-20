@@ -1,0 +1,52 @@
+{
+  "name": "web-access",
+  "preToolRules": [
+    {
+      "id": "local-web-tool",
+      "pattern": "^(?:web|browser)(?:__|_)",
+      "reason": "Web and browser tools are disabled by Agent Guard: Web Access."
+    },
+    {
+      "id": "remote-search-tool",
+      "pattern": "^mcp__(?!filesystem__).*?(?:web|browser|search|crawl|fetch|http|url)",
+      "reason": "Remote MCP search and retrieval tools are disabled by Agent Guard: Web Access."
+    }
+  ],
+  "preInputRules": [
+    {
+      "id": "shell-network-client",
+      "toolPattern": "^Bash$",
+      "pattern": "\\b(?:curl|wget|httpie|lynx|w3m)(?:\\s|$)",
+      "reason": "Shell network clients are disabled by Agent Guard: Web Access."
+    },
+    {
+      "id": "scripted-http-client",
+      "toolPattern": "^Bash$",
+      "pattern": "(?:requests\\.(?:get|post|put|delete)|urllib\\.request|axios\\.|fetch\\s*\\(|Net::HTTP)",
+      "reason": "Scripted HTTP requests are disabled by Agent Guard: Web Access."
+    },
+    {
+      "id": "open-web-url",
+      "toolPattern": "^Bash$",
+      "pattern": "(?:open|xdg-open|start)\\s+https?://",
+      "reason": "Opening external URLs is disabled by Agent Guard: Web Access."
+    }
+  ],
+  "postOutputRules": [
+    {
+      "id": "prompt-injection",
+      "pattern": "(?:ignore|disregard|override).{0,40}(?:previous|prior|system|developer).{0,30}instructions?",
+      "reason": "Tool output was quarantined because it resembles prompt injection."
+    },
+    {
+      "id": "prompt-exfiltration",
+      "pattern": "(?:reveal|print|send|exfiltrate).{0,40}(?:system prompt|developer message|hidden instructions)",
+      "reason": "Tool output was quarantined because it requests hidden instructions."
+    },
+    {
+      "id": "remote-command-instruction",
+      "pattern": "(?:run|execute|paste).{0,30}(?:this|the following).{0,20}(?:command|script)",
+      "reason": "Tool output was quarantined because it contains an untrusted command instruction."
+    }
+  ]
+}

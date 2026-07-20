@@ -1,0 +1,43 @@
+{
+  "name": "secret-egress",
+  "preToolRules": [],
+  "preInputRules": [
+    {
+      "id": "sensitive-file-path",
+      "pattern": "(?:^|[/\\\\])(?:\\.env(?:\\.[^/\\\\]+)?|credentials|auth\\.json|hosts\\.yml|id_(?:rsa|dsa|ecdsa|ed25519))(?:$|[/\\\\\"'\\s])",
+      "reason": "Access to a sensitive credential path was blocked by Agent Guard: Secret Egress."
+    },
+    {
+      "id": "private-key",
+      "pattern": "-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----",
+      "reason": "Private key material was blocked by Agent Guard: Secret Egress."
+    },
+    {
+      "id": "credential-token",
+      "pattern": "(?:\\b(?:sk|rk)-(?:proj-)?[A-Za-z0-9_-]{16,}\\b|\\bgh[pousr]_[A-Za-z0-9]{20,}\\b|\\bxox[baprs]-[A-Za-z0-9-]{16,}\\b|\\bAKIA[0-9A-Z]{16}\\b)",
+      "reason": "Credential-shaped data was blocked by Agent Guard: Secret Egress."
+    },
+    {
+      "id": "named-secret",
+      "pattern": "(?:authorization|api[_-]?key|access[_-]?token|client[_-]?secret)\\s*[:=]\\s*(?:bearer\\s+)?[\"']?[A-Za-z0-9_./+=-]{12,}",
+      "reason": "A named secret was blocked by Agent Guard: Secret Egress."
+    }
+  ],
+  "postOutputRules": [
+    {
+      "id": "private-key-output",
+      "pattern": "-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----",
+      "reason": "Tool output was quarantined because it appears to contain a private key."
+    },
+    {
+      "id": "credential-token-output",
+      "pattern": "(?:\\b(?:sk|rk)-(?:proj-)?[A-Za-z0-9_-]{16,}\\b|\\bgh[pousr]_[A-Za-z0-9]{20,}\\b|\\bxox[baprs]-[A-Za-z0-9-]{16,}\\b|\\bAKIA[0-9A-Z]{16}\\b)",
+      "reason": "Tool output was quarantined because it appears to contain a credential."
+    },
+    {
+      "id": "named-secret-output",
+      "pattern": "(?:authorization|api[_-]?key|access[_-]?token|client[_-]?secret)\\s*[:=]\\s*(?:bearer\\s+)?[\"']?[A-Za-z0-9_./+=-]{12,}",
+      "reason": "Tool output was quarantined because it appears to contain a named secret."
+    }
+  ]
+}

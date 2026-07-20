@@ -1,0 +1,26 @@
+{
+  "name": "agent-guard-secrets",
+  "version": "0.1.0",
+  "description": "Blocks sensitive credential access and quarantines secret-bearing output.",
+  "author": {
+    "name": "The AI Company",
+    "email": "poon@theaicompany.org",
+    "url": "https://github.com/arthurkkp-theaico"
+  },
+  "homepage": "https://github.com/arthurkkp-theaico/symphony/tree/main/plugins/agent-guard-secrets",
+  "repository": "https://github.com/arthurkkp-theaico/symphony",
+  "license": "Apache-2.0",
+  "keywords": ["security", "guardrails", "secrets", "dlp", "hooks"],
+  "interface": {
+    "displayName": "Agent Guard: Secret Egress",
+    "shortDescription": "Keep credentials out of tool calls and results",
+    "longDescription": "Demonstrates data-loss prevention before supported tools run and quarantines tool output that appears to contain credentials or private keys.",
+    "developerName": "The AI Company",
+    "category": "Security",
+    "capabilities": ["Policy Enforcement", "Data Loss Prevention", "Audit"],
+    "defaultPrompt": [
+      "Show which secret patterns this guard detects.",
+      "Review the latest guardrail audit decisions."
+    ]
+  }
+}
