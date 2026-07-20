@@ -1,0 +1,54 @@
+{
+  "name": "destructive-actions",
+  "preToolRules": [
+    {
+      "id": "destructive-tool-name",
+      "pattern": "(?:^|__)(?:delete|destroy|drop|purge|terminate|wipe|remove_all)(?:__|_|$)",
+      "reason": "A destructive tool call was blocked by Agent Guard: Destructive Actions."
+    }
+  ],
+  "preInputRules": [
+    {
+      "id": "recursive-force-delete",
+      "toolPattern": "^Bash$",
+      "pattern": "\\brm\\s+-(?:[A-Za-z]*r[A-Za-z]*f|[A-Za-z]*f[A-Za-z]*r)\\b",
+      "reason": "Recursive forced deletion was blocked by Agent Guard: Destructive Actions."
+    },
+    {
+      "id": "destructive-git",
+      "toolPattern": "^Bash$",
+      "pattern": "\\bgit\\s+(?:reset\\s+--hard|clean\\s+-[A-Za-z]*[fdx])",
+      "reason": "A destructive Git command was blocked by Agent Guard: Destructive Actions."
+    },
+    {
+      "id": "destructive-data-command",
+      "toolPattern": "^Bash$",
+      "pattern": "\\b(?:drop\\s+(?:database|table|schema)|truncate\\s+table|terraform\\s+destroy|kubectl\\s+delete\\s+(?:namespace|cluster|crd))\\b",
+      "reason": "A destructive infrastructure or data command was blocked by Agent Guard: Destructive Actions."
+    },
+    {
+      "id": "device-or-permission-damage",
+      "toolPattern": "^Bash$",
+      "pattern": "(?:\\bmkfs(?:\\.[A-Za-z0-9]+)?\\b|\\bdd\\s+[^;|]*\\bof=/dev/|\\bchmod\\s+-R\\s+777\\b)",
+      "reason": "A high-impact device or permission command was blocked by Agent Guard: Destructive Actions."
+    },
+    {
+      "id": "delete-file-patch",
+      "toolPattern": "^apply_patch$",
+      "pattern": "\\*\\*\\* Delete File:",
+      "reason": "File deletion through apply_patch was blocked by Agent Guard: Destructive Actions."
+    }
+  ],
+  "postOutputRules": [
+    {
+      "id": "unexpected-destructive-effect",
+      "pattern": "(?:deleted|destroyed|dropped|terminated|purged|wiped).{0,80}(?:resource|files?|database|table|schema|namespace|cluster|instance)",
+      "reason": "Tool output was quarantined because it reports a destructive side effect."
+    },
+    {
+      "id": "broad-removal-effect",
+      "pattern": "(?:removed|deleting).{0,40}(?:all|every|[1-9][0-9]{2,}).{0,40}(?:files?|resources?|records?|objects?)",
+      "reason": "Tool output was quarantined because it reports broad removal."
+    }
+  ]
+}

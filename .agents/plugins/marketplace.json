@@ -1,0 +1,44 @@
+{
+  "name": "personal",
+  "interface": {
+    "displayName": "Symphony Guardrails"
+  },
+  "plugins": [
+    {
+      "name": "agent-guard-web",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agent-guard-web"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Security"
+    },
+    {
+      "name": "agent-guard-secrets",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agent-guard-secrets"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Security"
+    },
+    {
+      "name": "agent-guard-destructive",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agent-guard-destructive"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Security"
+    }
+  ]
+}
