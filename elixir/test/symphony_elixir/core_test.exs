@@ -103,23 +103,22 @@ defmodule SymphonyElixir.CoreTest do
     assert Map.get(tracker, "board_url") == "https://theaicompany-team-a0c6o5ij.atlassian.net/jira/servicedesk/projects/SD/boards/1"
     assert Map.get(tracker, "project_key") == "SD"
     assert is_list(Map.get(tracker, "active_states"))
-    assert "Triaged" in Map.get(tracker, "active_states")
+    assert "Work in progress" in Map.get(tracker, "active_states")
+    refute "Triaged" in Map.get(tracker, "active_states")
     assert is_list(Map.get(tracker, "terminal_states"))
 
     assert get_in(config, ["workspace", "root"]) ==
-             "~/code/doordash-data-platform-strawman-workspaces"
+             "~/code/espocrm-workspaces"
 
-    assert get_in(config, ["workspace", "github_repository"]) ==
-             "arthurkkp-theaico/doordash-data-platform-strawman"
+    refute Map.has_key?(Map.fetch!(config, "workspace"), "github_repository")
 
     hooks = Map.get(config, "hooks", %{})
     assert is_map(hooks)
-    assert Map.get(hooks, "after_create") =~ "SYMPHONY_REPO_PROVIDER"
+    assert Map.get(hooks, "after_create") =~ "SYMPHONY_GITLAB_REPO_URL"
 
     assert Map.get(hooks, "after_create") =~
-             "https://github.com/arthurkkp-theaico/doordash-data-platform-strawman.git"
+             "https://gitlab.com/poon5/espocrm.git"
 
-    assert Map.get(hooks, "after_create") =~ "file://${HOME}/code/gitlab-dummy/symphony-dummy.git"
     assert Map.get(hooks, "after_create") =~ ~s(git clone --depth 1 "$repo_url" .)
     assert Map.get(hooks, "after_create") =~ "uv sync --all-groups"
     assert Map.get(hooks, "before_remove") =~ "SYMPHONY_ELIXIR_DIR"
@@ -128,7 +127,14 @@ defmodule SymphonyElixir.CoreTest do
     assert Map.get(hooks, "before_remove") =~ "--branch"
 
     assert String.trim(prompt) != ""
-    assert prompt =~ "`Triaged` -> implementation actively underway"
+
+    assert prompt =~
+             "`Open` -> queued; immediately use Jira's `Start progress` transition to move into `Work in progress` before active work."
+
+    refute prompt =~ "`Assign` transition"
+    refute prompt =~ "`Triaged`"
+    assert prompt =~ "origin/master"
+    refute prompt =~ "origin/main"
     assert is_binary(Config.workflow_prompt())
     assert Config.workflow_prompt() == prompt
   end
@@ -1111,7 +1117,7 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "Only stop early for a true blocker"
     assert prompt =~ "Do not include \"next steps for user\""
     assert prompt =~ "Run `make test` as the default local validation gate"
-    assert prompt =~ "`gh pr merge --squash --delete-branch`"
+    assert prompt =~ "`glab mr merge --squash --remove-source-branch --yes`"
     assert prompt =~ "Continuation context:"
     assert prompt =~ "retry attempt #2"
   end

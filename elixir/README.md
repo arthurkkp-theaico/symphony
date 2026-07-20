@@ -154,11 +154,9 @@ Notes:
   identifier, title, and body.
 - Use `hooks.after_create` to bootstrap a fresh workspace. For a Git-backed repo, you can run
   `git clone ... .` there, along with any other setup commands you need.
-- The sample `WORKFLOW.md` keeps GitHub as the default clone target and can switch to a local
-  dummy GitLab repo for demos:
-  - GitHub default: `SYMPHONY_REPO_PROVIDER=github`
-  - GitLab dummy: `SYMPHONY_REPO_PROVIDER=gitlab`
-  - Dummy URL default: `file://${HOME}/code/gitlab-dummy/symphony-dummy.git`
+- The sample `WORKFLOW.md` uses GitLab as its default clone target:
+  - Provider: `SYMPHONY_REPO_PROVIDER=gitlab`
+  - Repository: `SYMPHONY_GITLAB_REPO_URL=https://gitlab.com/poon5/espocrm.git`
 - If a hook needs `mise exec` inside a freshly cloned workspace, trust the repo config and fetch
   the project dependencies in `hooks.after_create` before invoking `mise` later from other hooks.
 - Linear `tracker.api_key` reads from `LINEAR_API_KEY` when unset or when value is `$LINEAR_API_KEY`.
